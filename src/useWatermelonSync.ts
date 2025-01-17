@@ -5,7 +5,7 @@
 import { ApiWmdbItem1, ExtendedApi, Fetch } from "@dwidge/crud-api-react";
 import { groupBy, unixSeconds } from "@dwidge/utils-js";
 import { SyncPullArgs, SyncPushArgs } from "@nozbe/watermelondb/sync";
-import { OnSync } from "./Sync.js";
+import { OnSyncEvent } from "./Sync.js";
 import { fetchItemsInChunks } from "./fetchItemsInChunks.js";
 import { ParseItem } from "./useWatermelonLocal.js";
 
@@ -13,7 +13,7 @@ export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
   pullChanges: (
     fetch: Fetch,
     { lastPulledAt, schemaVersion, migration }: SyncPullArgs,
-    onSync?: OnSync,
+    onSyncEvent?: OnSyncEvent,
   ) => Promise<{
     changes: {
       [x: string]: {
@@ -27,7 +27,7 @@ export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
   pushChanges: (
     fetch: Fetch,
     { changes, lastPulledAt }: SyncPushArgs,
-    onSync?: OnSync,
+    onSyncEvent?: OnSyncEvent,
   ) => Promise<void>;
 };
 
@@ -39,7 +39,7 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
   const pullChanges = async (
     fetch: Fetch,
     { lastPulledAt, schemaVersion, migration }: SyncPullArgs,
-    onSync?: OnSync,
+    onSyncEvent?: OnSyncEvent,
   ) => {
     const api = useApi(fetch);
     const limit = 1000;
@@ -75,10 +75,14 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
           " invalid rows",
       );
 
-    onSync?.(table, {
-      created: created.length,
-      updated: updated.length,
-      deleted: deleted.length,
+    onSyncEvent?.({
+      type: "pull",
+      table,
+      stats: {
+        created: created.length,
+        updated: updated.length,
+        deleted: deleted.length,
+      },
     });
 
     return {
@@ -98,15 +102,19 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
   const pushChanges = async (
     fetch: Fetch,
     { changes, lastPulledAt }: SyncPushArgs,
-    onSync?: OnSync,
+    onSyncEvent?: OnSyncEvent,
   ) => {
     const api = useApi(fetch);
     const { created = [], updated = [], deleted = [] } = changes[table] || {};
 
-    onSync?.(table, {
-      created: created.length,
-      updated: updated.length,
-      deleted: deleted.length,
+    onSyncEvent?.({
+      type: "push",
+      table,
+      stats: {
+        created: created.length,
+        updated: updated.length,
+        deleted: deleted.length,
+      },
     });
 
     const creates = created.map(parse);

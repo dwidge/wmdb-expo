@@ -13,15 +13,99 @@ import {
   useEffect,
 } from "react";
 
-export type OnSync = (
-  table: string,
-  stats: { created: number; updated: number; deleted: number },
-) => void;
+export type SyncStats = { created: number; updated: number; deleted: number };
 
-const defaultOnPull: OnSync = (table: string, { created, updated, deleted }) =>
-  console.log("PullChanges", table, created, updated, deleted);
-const defaultOnPush: OnSync = (table: string, { created, updated, deleted }) =>
-  console.log("PushChanges", table, created, updated, deleted);
+export type VerboseSyncEvent = {
+  type: "verbose";
+  message: string;
+  data?: unknown[];
+};
+
+export type PullSyncEvent = {
+  type: "pull";
+  table: string;
+  stats: SyncStats;
+};
+
+export type PushSyncEvent = {
+  type: "push";
+  table: string;
+  stats: SyncStats;
+};
+
+export type ErrorSyncEvent = {
+  type: "error";
+  error: Error;
+};
+
+export type StartSyncEvent = {
+  type: "sync-start";
+};
+
+export type EndSyncEvent = {
+  type: "sync-end";
+  success: boolean;
+};
+
+export type SkipSyncEvent = {
+  type: "sync-ignored";
+  reason: string;
+};
+
+export type IntervalSetupSyncEvent = {
+  type: "interval-setup";
+  intervalSeconds: number;
+};
+
+export type IntervalClearedSyncEvent = {
+  type: "interval-cleared";
+};
+
+export type UserSyncEvent = {
+  type: "user";
+  message: string;
+};
+
+export type SyncEventType =
+  | VerboseSyncEvent
+  | PullSyncEvent
+  | PushSyncEvent
+  | ErrorSyncEvent
+  | StartSyncEvent
+  | EndSyncEvent
+  | SkipSyncEvent
+  | IntervalSetupSyncEvent
+  | IntervalClearedSyncEvent
+  | UserSyncEvent;
+
+export type OnSyncEvent = (event: SyncEventType) => void;
+
+export const makeSyncEventLogger =
+  (logger: (...args: any[]) => unknown = console.log) =>
+  (event: SyncEventType): unknown => {
+    const loggers: { [key in SyncEventType["type"]]: (event: any) => void } = {
+      verbose: (e: VerboseSyncEvent) =>
+        logger("SyncEvent:", e.message, ...(e.data || [])),
+      pull: (e: PullSyncEvent) =>
+        logger("SyncEvent: PullChanges", e.table, e.stats),
+      push: (e: PushSyncEvent) =>
+        logger("SyncEvent: PushChanges", e.table, e.stats),
+      error: (e: ErrorSyncEvent) => logger("SyncEvent: Error", e.error),
+      "sync-start": () => logger("SyncEvent: Sync start"),
+      "sync-end": (e: EndSyncEvent) =>
+        logger("SyncEvent: Sync end, success:", e.success),
+      "sync-ignored": (e: SkipSyncEvent) =>
+        logger("SyncEvent: Sync ignored:", e.reason),
+      "interval-setup": (e: IntervalSetupSyncEvent) =>
+        logger(
+          `SyncEvent: Setting up sync interval for ${e.intervalSeconds} seconds`,
+        ),
+      "interval-cleared": () => logger("SyncEvent: Clearing sync interval"),
+      user: (e: UserSyncEvent) => logger("User Message:", e.message),
+    };
+
+    return loggers[event.type](event);
+  };
 
 export interface SyncContextValue {
   busy: boolean;
@@ -29,11 +113,7 @@ export interface SyncContextValue {
   online: boolean;
   setOnline: React.Dispatch<React.SetStateAction<boolean>>;
   syncTables: () => undefined | ((context: SyncContextValue) => Promise<void>);
-  notify: (message: string) => void;
-  log: (message: string, ...v: unknown[]) => void;
-  onPull?: OnSync;
-  onPush?: OnSync;
-  onError?: (e: Error) => void;
+  onSyncEvent: OnSyncEvent;
   busyRef: MutableRefObject<boolean>;
   lastSyncTime: number | null;
   setLastSyncTime: React.Dispatch<React.SetStateAction<number | null>>;
@@ -46,31 +126,15 @@ const syncTablesMock = () => async () => {
   console.log("syncTablesMock1: Syncing tables...");
   return new Promise<void>((resolve) => setTimeout(resolve, 1000));
 };
-const notifyDefault = (message: string) =>
-  console.log("SyncProvider1:", message);
 
 export const SyncProvider: React.FC<
   PropsWithChildren<
-    Partial<
-      Pick<
-        SyncContextValue,
-        | "syncTables"
-        | "notify"
-        | "log"
-        | "onPull"
-        | "onPush"
-        | "onError"
-        | "syncIntervalSeconds"
-      >
-    >
+    Pick<SyncContextValue, "syncTables" | "onSyncEvent" | "syncIntervalSeconds">
   >
 > = ({
   children,
   syncTables = syncTablesMock,
-  notify = notifyDefault,
-  log = (...v) => console.log(...v),
-  onPull = defaultOnPull,
-  onPush = defaultOnPush,
+  onSyncEvent = makeSyncEventLogger(),
   syncIntervalSeconds = 10,
 }) => {
   const [busy, setBusy] = useState(false);
@@ -84,10 +148,7 @@ export const SyncProvider: React.FC<
     online,
     setOnline,
     syncTables,
-    notify,
-    log,
-    onPull,
-    onPush,
+    onSyncEvent,
     busyRef,
     lastSyncTime,
     setLastSyncTime,
@@ -112,50 +173,52 @@ export const useSyncTrigger = (context = useSyncContext()) => {
     setOnline,
     busy: isBusy,
     syncTables,
-    notify,
-    log,
+    onSyncEvent,
     busyRef,
     setLastSyncTime,
   } = context;
   const syncTablesF = syncTables();
 
   const triggerSync = useCallback(async () => {
-    log("useSyncDb1: Sync try");
+    onSyncEvent({ type: "verbose", message: "Sync try" });
     let success = false;
 
     if (busyRef.current) {
-      log("useSyncDb1: Sync already in progress, ignoring trigger.");
+      onSyncEvent({ type: "sync-ignored", reason: "Sync already in progress" });
       return false;
     }
 
     if (!syncTablesF) {
-      log("useSyncDb2: Sync disabled, ignoring trigger.");
+      onSyncEvent({ type: "sync-ignored", reason: "Sync disabled" });
       return false;
     }
 
-    log("useSyncDb2: Sync start");
+    onSyncEvent({ type: "sync-start" });
     busyRef.current = true;
     setBusy(true);
 
     try {
       await syncTablesF(context);
-      notify("Synchronized");
+      onSyncEvent({ type: "user", message: "Synchronized" });
       setOnline(true);
       success = true;
     } catch (e) {
-      log("useSyncDbE1: Sync failed", e);
-      notify("Offline");
+      onSyncEvent({ type: "user", message: "Offline" });
+      onSyncEvent({
+        type: "error",
+        error: e instanceof Error ? e : new Error(`${e}`),
+      });
       setOnline(false);
       success = false;
     } finally {
       setBusy(false);
       busyRef.current = false;
-      log("useSyncDb3: Sync end");
+      onSyncEvent({ type: "sync-end", success });
       setLastSyncTime(Math.floor(Date.now() / 1000));
     }
 
     return success;
-  }, [syncTablesF, setBusy, setOnline, notify, log, busyRef, setLastSyncTime]);
+  }, [syncTablesF, setBusy, setOnline, onSyncEvent, busyRef, setLastSyncTime]);
 
   return syncTablesF && !isBusy ? triggerSync : undefined;
 };
@@ -166,40 +229,46 @@ export const useSyncMode = () => {
 };
 
 export const useIntervalSync = (context = useSyncContext()) => {
-  const { syncIntervalSeconds, log } = context;
+  const { syncIntervalSeconds, onSyncEvent } = context;
   const triggerSync = useSyncTrigger(context);
 
   useEffect(() => {
     if (triggerSync && syncIntervalSeconds && syncIntervalSeconds > 0) {
-      log(
-        `useAutoSync: Setting up sync interval for ${syncIntervalSeconds} seconds`,
-      );
+      onSyncEvent({
+        type: "interval-setup",
+        intervalSeconds: syncIntervalSeconds,
+      });
       const intervalId = setInterval(triggerSync, syncIntervalSeconds * 1000);
       return () => {
-        log("useAutoSync: Clearing sync interval");
+        onSyncEvent({ type: "interval-cleared" });
         clearInterval(intervalId);
       };
     } else {
       if (syncIntervalSeconds && syncIntervalSeconds <= 0) {
-        log(
-          "useAutoSync: syncIntervalSeconds should be greater than 0 to enable auto sync.",
-        );
+        onSyncEvent({
+          type: "verbose",
+          message:
+            "syncIntervalSeconds should be greater than 0 to enable auto sync.",
+        });
       }
     }
-  }, [triggerSync, syncIntervalSeconds]);
+  }, [triggerSync, syncIntervalSeconds, onSyncEvent]);
 };
 
 export const useEventSync = (
   condition = false,
   context = useSyncContext(),
   triggerSync = useSyncTrigger(context),
-  { log } = context,
 ) => {
+  const { onSyncEvent } = context;
   useEffect(() => {
     if (condition && triggerSync) {
-      log("useEventSync1: Performing sync.");
+      onSyncEvent({
+        type: "verbose",
+        message: "Performing sync due to event.",
+      });
       triggerSync();
     }
-  }, [condition]);
+  }, [condition, triggerSync, onSyncEvent]);
   return triggerSync;
 };

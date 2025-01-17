@@ -7,7 +7,7 @@ import { asyncMap } from "@dwidge/utils-js";
 import { Database } from "@nozbe/watermelondb";
 import { synchronize } from "@nozbe/watermelondb/sync";
 import merge from "ts-deepmerge";
-import { SyncContextValue } from "./Sync.js";
+import { OnSyncEvent, SyncContextValue } from "./Sync.js";
 import { WatermelonSync } from "./useWatermelonSync.js";
 
 /**
@@ -28,7 +28,7 @@ export const syncTables = async (
   fetch: Fetch,
   database: Database,
   tables: WatermelonSync<any>[],
-  { onPull, onPush, onError }: SyncContextValue,
+  { onSyncEvent }: SyncContextValue,
 ) =>
   synchronize({
     database,
@@ -42,19 +42,19 @@ export const syncTables = async (
               schemaVersion,
               migration,
             },
-            onPull,
+            onSyncEvent,
           ),
         )),
       ),
     pushChanges: async ({ changes, lastPulledAt }) => {
       await asyncMap(tables, (table) =>
-        table.pushChanges(fetch, { changes, lastPulledAt }, onPush),
+        table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent),
       );
     },
     migrationsEnabledAtVersion: 1,
-  }).catch(catchDiagnosticError(onError));
+  }).catch(catchDiagnosticError(onSyncEvent));
 
-const catchDiagnosticError = (onError?: (e: Error) => void) => (e) => {
+const catchDiagnosticError = (onSyncEvent?: OnSyncEvent) => (e: unknown) => {
   // log here because wmdb seems to swallow exceptions
   console.log("catchDiagnosticErrorE1", e);
   if (e instanceof Error) {
@@ -65,6 +65,7 @@ const catchDiagnosticError = (onError?: (e: Error) => void) => (e) => {
       );
     }
   }
-  if (onError) onError(e);
+  if (e instanceof Error && onSyncEvent)
+    onSyncEvent({ type: "error", error: e });
   else throw e;
 };
