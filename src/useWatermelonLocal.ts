@@ -15,7 +15,7 @@ import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q } from "@nozbe/watermelondb";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
@@ -298,6 +298,42 @@ export const useWatermelonLocal = <
     });
   };
 
+  const useCount = (filter?: Partial<T>): number | undefined => {
+    const [count, setCount] = useState<number | undefined>(undefined);
+
+    useEffect(() => {
+      let isMounted = true;
+      const fetchCount = async () => {
+        try {
+          const conditions = buildQueryConditions({
+            deletedAt: filter?.deletedAt ?? null,
+            ...filter,
+          } as ApiFilterObject<T>);
+          const collection = database.get<W>(table);
+          const fetchedCount = await collection
+            .query(...conditions)
+            .fetchCount();
+          if (isMounted) {
+            setCount(fetchedCount);
+          }
+        } catch (error) {
+          console.error("Error fetching count:", error);
+          if (isMounted) {
+            setCount(undefined);
+          }
+        }
+      };
+
+      fetchCount();
+
+      return () => {
+        isMounted = false;
+      };
+    }, [database, table, JSON.stringify(filter)]);
+
+    return count;
+  };
+
   return {
     useGetList,
     useSetList,
@@ -311,5 +347,6 @@ export const useWatermelonLocal = <
     useUpdateItem,
     useDeleteItem,
     useItem,
+    useCount,
   } as any;
 };
