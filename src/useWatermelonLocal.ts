@@ -3,6 +3,8 @@
 // https://www.boost.org/LICENSE_1_0.txt
 
 import {
+  ApiFilterObject,
+  ApiRecord,
   assert,
   BaseApiHooks,
   QueryOptions,
@@ -52,8 +54,40 @@ export const useWatermelonLocal = <
     delItems?: (v: PT[]) => Promise<PT[]>,
   ] => [items, setItems, delItems];
 
+  const buildQueryConditions = <T extends ApiRecord>(
+    filter?: ApiFilterObject<T>,
+  ): Q.Where[] => {
+    const conditions: Q.Where[] = [];
+    if (filter) {
+      for (const [k, rawValue] of Object.entries(dropUndefined(filter))) {
+        const key = k as StringKey<T>;
+        const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+        const orConditions: Q.Where[] = [];
+
+        for (const v of values) {
+          if (typeof v === "object" && v !== null && "range" in v) {
+            const [lower, upper] = v.range;
+            if (lower != undefined) {
+              orConditions.push(Q.where(key, Q.gte(lower)));
+            }
+            if (upper != undefined) {
+              orConditions.push(Q.where(key, Q.lt(upper)));
+            }
+          } else if (v !== undefined) {
+            orConditions.push(Q.where(key, v));
+          }
+        }
+        if (orConditions.length > 0) {
+          conditions.push(Q.or(...orConditions));
+        }
+      }
+    }
+
+    return conditions;
+  };
+
   const useGetList = (
-    filter?: PT,
+    filter?: ApiFilterObject<T>,
     { columns = defaultGetColumns, ...options }: QueryOptions<K> = {},
   ): PT[] | undefined => (
     assert(Array.isArray(columns), "useGetListE1"),
@@ -70,23 +104,15 @@ export const useWatermelonLocal = <
       [
         useWmdbQuery<W>(
           table,
-          useMemo(
-            () =>
-              filter
-                ? [
-                    ...Object.entries(dropUndefined(filter ?? ({} as PT))).map(
-                      ([k, v]) =>
-                        Array.isArray(v)
-                          ? Q.or(...v.map((val) => Q.where(k, val)))
-                          : Q.where(k, v),
-                    ),
-                    ...(columns.includes("deletedAt" as StringKey<T>)
-                      ? []
-                      : [Q.where("deletedAt", null)]),
-                  ]
-                : [Q.where("id", null)],
-            [JSON.stringify(filter ?? null), JSON.stringify(columns)],
-          ),
+          useMemo(() => {
+            const conditions = buildQueryConditions({
+              deletedAt: columns.includes("deletedAt" as StringKey<T>)
+                ? undefined
+                : null,
+              ...filter,
+            } as ApiFilterObject<T>);
+            return conditions.length > 0 ? conditions : [Q.where("id", null)];
+          }, [JSON.stringify(filter ?? null), JSON.stringify(columns)]),
           useMemo(
             () => ({ columns, ...options }) as any,
             [JSON.stringify({ columns, ...options })],
