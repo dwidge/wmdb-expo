@@ -86,32 +86,21 @@ export type SyncEventType =
 
 export type OnSyncEvent = (event: SyncEventType) => void;
 
-export const makeSyncEventLogger =
-  (logger: (...args: any[]) => unknown = console.log) =>
-  (event: SyncEventType): unknown => {
-    const loggers: { [key in SyncEventType["type"]]: (event: any) => void } = {
-      verbose: (e: VerboseSyncEvent) =>
-        logger("SyncEvent:", e.message, ...(e.data || [])),
-      pull: (e: PullSyncEvent) =>
-        logger("SyncEvent: PullChanges", e.table, e.stats),
-      push: (e: PushSyncEvent) =>
-        logger("SyncEvent: PushChanges", e.table, e.stats),
-      error: (e: ErrorSyncEvent) => logger("SyncEvent: Error", e.error),
-      "sync-start": () => logger("SyncEvent: Sync start"),
-      "sync-end": (e: EndSyncEvent) =>
-        logger("SyncEvent: Sync end, success:", e.success),
-      "sync-ignored": (e: SkipSyncEvent) =>
-        logger("SyncEvent: Sync ignored:", e.reason),
-      "interval-setup": (e: IntervalSetupSyncEvent) =>
-        logger(
-          `SyncEvent: Setting up sync interval for ${e.intervalSeconds} seconds`,
-        ),
-      "interval-cleared": () => logger("SyncEvent: Clearing sync interval"),
-      user: (e: UserSyncEvent) => logger("User Message:", e.message),
-    };
-
-    return loggers[event.type](event);
-  };
+export const makeSyncEventHandler =
+  (
+    handlers: { [key in SyncEventType["type"]]?: (event: any) => void } = {
+      error: (event: ErrorSyncEvent) =>
+        console.log("ErrorSyncEvent", event.error),
+      user: (event: UserSyncEvent) =>
+        console.log("UserSyncEvent", event.message),
+      progress: (e: ProgressSyncEvent) =>
+        console.log("ProgressSyncEvent", `${(e.progress * 100).toFixed(0)}%`),
+    },
+    catchall: (event: SyncEventType) => void = (event: SyncEventType) =>
+      console.log("SyncEvent", event),
+  ) =>
+  (event: SyncEventType): unknown =>
+    (handlers[event.type] ?? catchall)(event);
 
 export interface SyncContextValue {
   busy: boolean;
@@ -140,7 +129,7 @@ export const SyncProvider: React.FC<
 > = ({
   children,
   syncTables = syncTablesMock,
-  onSyncEvent = makeSyncEventLogger(),
+  onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
 }) => {
   const [busy, setBusy] = useState(false);
