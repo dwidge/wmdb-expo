@@ -32,9 +32,14 @@ export const syncTables = async (
 ) =>
   synchronize({
     database,
-    pullChanges: async ({ lastPulledAt, schemaVersion, migration }) =>
-      merge(
-        ...(await asyncMap(tables, (table) =>
+    pullChanges: async ({ lastPulledAt, schemaVersion, migration }) => {
+      const r = await asyncMap(
+        tables,
+        async (table, index) => (
+          onSyncEvent({
+            type: "progress",
+            progress: index / tables.length,
+          }),
           table.pullChanges(
             fetch,
             {
@@ -43,13 +48,27 @@ export const syncTables = async (
               migration,
             },
             onSyncEvent,
-          ),
-        )),
-      ),
-    pushChanges: async ({ changes, lastPulledAt }) => {
-      await asyncMap(tables, (table) =>
-        table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent),
+          )
+        ),
       );
+      onSyncEvent({
+        type: "progress",
+        progress: 1,
+      });
+      return merge(...r);
+    },
+    pushChanges: async ({ changes, lastPulledAt }) => {
+      await asyncMap(tables, async (table, index) => {
+        onSyncEvent({
+          type: "progress",
+          progress: index / tables.length,
+        });
+        await table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent);
+      });
+      onSyncEvent({
+        type: "progress",
+        progress: 1,
+      });
     },
     migrationsEnabledAtVersion: 1,
   }).catch(catchDiagnosticError(onSyncEvent));

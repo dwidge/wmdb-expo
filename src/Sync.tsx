@@ -66,6 +66,11 @@ export type UserSyncEvent = {
   message: string;
 };
 
+export type ProgressSyncEvent = {
+  type: "progress";
+  progress: number; // 0 to 1
+};
+
 export type SyncEventType =
   | VerboseSyncEvent
   | PullSyncEvent
@@ -76,7 +81,8 @@ export type SyncEventType =
   | SkipSyncEvent
   | IntervalSetupSyncEvent
   | IntervalClearedSyncEvent
-  | UserSyncEvent;
+  | UserSyncEvent
+  | ProgressSyncEvent;
 
 export type OnSyncEvent = (event: SyncEventType) => void;
 
