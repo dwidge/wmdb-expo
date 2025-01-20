@@ -43,7 +43,9 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
   ) => {
     const api = useApi(fetch);
     const limit = 1000;
-    const items = (await fetchItemsInChunks(api, limit)).map(parse);
+    const newItems = (await fetchItemsInChunks(api, limit)).map(parse);
+
+    const items = excludeItemsWithInvalidCreatedAtUpdatedAt<T>(newItems, table);
 
     const {
       created = [],
@@ -64,16 +66,6 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
           ? "ignored"
           : "created",
     );
-
-    const badRows = items.filter((v) => !v.createdAt || !v.updatedAt);
-    if (badRows.length)
-      console.warn(
-        "pullChangesE1: Column createdAt and updatedAt must not be empty: Table [" +
-          table +
-          "] has " +
-          badRows.length +
-          " invalid rows",
-      );
 
     onSyncEvent?.({
       type: "pull",
@@ -145,3 +137,19 @@ const deletedAfter =
   ({ deletedAt }: Omit<Partial<ApiWmdbItem1>, "id">) =>
     deletedAt && deletedAt > timestamp;
 const isDeleted = deletedAfter(0);
+
+function excludeItemsWithInvalidCreatedAtUpdatedAt<T extends ApiWmdbItem1>(
+  newItems: Partial<T>[],
+  table: string,
+) {
+  const items = newItems.filter((v) => v.createdAt && v.updatedAt);
+  if (items.length < newItems.length)
+    console.warn(
+      "pullChangesE1: Column createdAt and updatedAt must not be empty, excluding rows: Table [" +
+        table +
+        "] has " +
+        (newItems.length - items.length) +
+        " invalid rows",
+    );
+  return items;
+}
