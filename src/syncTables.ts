@@ -7,7 +7,7 @@ import { asyncMap } from "@dwidge/utils-js";
 import { Database } from "@nozbe/watermelondb";
 import { synchronize } from "@nozbe/watermelondb/sync";
 import merge from "ts-deepmerge";
-import { OnSyncEvent, SyncContextValue } from "./Sync.js";
+import { OnSyncEvent } from "./Sync.js";
 import { WatermelonSync } from "./useWatermelonSync.js";
 
 /**
@@ -21,14 +21,14 @@ import { WatermelonSync } from "./useWatermelonSync.js";
  * @param {Fetch} fetch The fetch API instance used for making network requests.
  * @param {Database} database The WatermelonDB database instance.
  * @param {WatermelonSync<any>[]} tables An array of `WatermelonSync` objects, each representing a table to synchronize. The order of this array is important for foreign key constraints.
- * @param {SyncContextValue} { onPull, onPush } Callbacks to be executed before and after pull and push operations for each table.
+ * @param {OnSyncEvent} onSyncEvent Callback to send events.
  * @returns {Promise<void>} A promise that resolves when the synchronization is complete.
  */
 export const syncTables = async (
   fetch: Fetch,
   database: Database,
   tables: WatermelonSync<any>[],
-  { onSyncEvent }: SyncContextValue,
+  onSyncEvent: OnSyncEvent,
 ) =>
   synchronize({
     database,
@@ -71,20 +71,17 @@ export const syncTables = async (
       });
     },
     migrationsEnabledAtVersion: 1,
-  }).catch(catchDiagnosticError(onSyncEvent));
+  }).catch(catchDiagnosticError);
 
-const catchDiagnosticError = (onSyncEvent?: OnSyncEvent) => (e: unknown) => {
-  // log here because wmdb seems to swallow exceptions
-  console.log("catchDiagnosticErrorE1", e);
+const catchDiagnosticError = (e: unknown) => {
+  // console.log("catchDiagnosticErrorE1", e);
   if (e instanceof Error) {
     const m = e.message.toString();
     if (m == "Cannot read properties of null (reading 'find')") {
-      console.log(
+      throw new Error(
         "catchDiagnosticErrorE2: Database has changed but did not migrate, please logout or reset the wmdb SQLLite/IndexDB",
       );
     }
   }
-  if (e instanceof Error && onSyncEvent)
-    onSyncEvent({ type: "error", error: e });
-  else throw e;
+  throw e;
 };

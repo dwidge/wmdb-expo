@@ -2,15 +2,13 @@
 // Distributed under the Boost Software License, Version 1.0.
 // https://www.boost.org/LICENSE_1_0.txt
 
+import { AsyncIntervalProvider, useAsyncInterval } from "@dwidge/hooks-react";
 import {
   createContext,
-  useContext,
-  useState,
   PropsWithChildren,
   useCallback,
-  useRef,
-  MutableRefObject,
-  useEffect,
+  useContext,
+  useMemo,
 } from "react";
 
 export type SyncStats = { created: number; updated: number; deleted: number };
@@ -52,15 +50,6 @@ export type SkipSyncEvent = {
   reason: string;
 };
 
-export type IntervalSetupSyncEvent = {
-  type: "interval-setup";
-  intervalSeconds: number;
-};
-
-export type IntervalClearedSyncEvent = {
-  type: "interval-cleared";
-};
-
 export type UserSyncEvent = {
   type: "user";
   message: string;
@@ -79,8 +68,6 @@ export type SyncEventType =
   | StartSyncEvent
   | EndSyncEvent
   | SkipSyncEvent
-  | IntervalSetupSyncEvent
-  | IntervalClearedSyncEvent
   | UserSyncEvent
   | ProgressSyncEvent;
 
@@ -103,15 +90,12 @@ export const makeSyncEventHandler =
     (handlers[event.type] ?? catchall)(event);
 
 export interface SyncContextValue {
+  lastSyncTime: Date | null;
   busy: boolean;
-  setBusy: React.Dispatch<React.SetStateAction<boolean>>;
   online: boolean;
-  setOnline: React.Dispatch<React.SetStateAction<boolean>>;
-  syncTables: () => undefined | ((context: SyncContextValue) => Promise<void>);
+  trigger?: () => Promise<boolean>;
+  abort?: () => void;
   onSyncEvent: OnSyncEvent;
-  busyRef: MutableRefObject<boolean>;
-  lastSyncTime: number | null;
-  setLastSyncTime: React.Dispatch<React.SetStateAction<number | null>>;
   syncIntervalSeconds?: number;
 }
 
@@ -124,7 +108,12 @@ const syncTablesMock = () => async () => {
 
 export const SyncProvider: React.FC<
   PropsWithChildren<
-    Pick<SyncContextValue, "syncTables" | "onSyncEvent" | "syncIntervalSeconds">
+    Pick<SyncContextValue, "onSyncEvent" | "syncIntervalSeconds"> & {
+      syncTables?: (
+        signal: AbortSignal,
+        onSyncEvent: OnSyncEvent,
+      ) => Promise<void>;
+    }
   >
 > = ({
   children,
@@ -132,25 +121,94 @@ export const SyncProvider: React.FC<
   onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
 }) => {
-  const [busy, setBusy] = useState(false);
-  const [online, setOnline] = useState(false);
-  const busyRef = useRef(false);
-  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const triggerSync: (signal: AbortSignal) => Promise<boolean> = useCallback(
+    async (signal: AbortSignal) => {
+      if (!syncTables) {
+        onSyncEvent({ type: "sync-ignored", reason: "Sync disabled or busy" });
+        return false;
+      } else {
+        onSyncEvent({ type: "sync-start" });
+        try {
+          await syncTables(signal, onSyncEvent);
+          onSyncEvent({ type: "sync-end", success: true });
+          onSyncEvent({ type: "user", message: "Synchronized" });
+          return true;
+        } catch (e) {
+          onSyncEvent({ type: "sync-end", success: false });
+          if (signal.aborted) {
+            onSyncEvent({ type: "user", message: "Cancelled" });
+            return true;
+          } else {
+            if (
+              e instanceof Error &&
+              e.message.includes("attachBaseUrlInterceptor")
+            ) {
+              onSyncEvent({ type: "user", message: "Offline" });
+              return false;
+            } else {
+              onSyncEvent({
+                type: "error",
+                error: e instanceof Error ? e : new Error(`${e}`),
+              });
+              throw e;
+            }
+          }
+        }
+      }
+    },
+    [syncTables, onSyncEvent],
+  );
 
-  const value: SyncContextValue = {
-    busy,
-    setBusy,
-    online,
-    setOnline,
-    syncTables,
-    onSyncEvent,
-    busyRef,
-    lastSyncTime,
-    setLastSyncTime,
-    syncIntervalSeconds,
-  };
+  return (
+    <AsyncIntervalProvider
+      intervalSeconds={syncIntervalSeconds}
+      asyncFn={triggerSync}
+      defaultArg={undefined}
+    >
+      <SyncProviderInner onSyncEvent={onSyncEvent}>
+        {children}
+      </SyncProviderInner>
+    </AsyncIntervalProvider>
+  );
+};
 
-  useIntervalSync(value);
+const SyncProviderInner: React.FC<
+  PropsWithChildren<{ onSyncEvent: OnSyncEvent }>
+> = ({ children, onSyncEvent }) => {
+  const {
+    lastRunTime,
+    lastResult,
+    lastError,
+    isRunning,
+    trigger,
+    abort,
+    intervalSeconds,
+  } = useAsyncInterval<undefined, boolean>();
+
+  const online = !lastError && !!lastResult && !!lastRunTime;
+
+  const value: SyncContextValue = useMemo(
+    () => ({
+      busy: isRunning,
+      online,
+      trigger: trigger ? () => trigger(undefined) : undefined,
+      abort,
+      onSyncEvent,
+      lastSyncTime: lastRunTime,
+      syncIntervalSeconds: intervalSeconds,
+    }),
+    [
+      isRunning,
+      online,
+      trigger,
+      abort,
+      onSyncEvent,
+      lastRunTime,
+      trigger,
+      intervalSeconds,
+    ],
+  );
+
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
 };
 
@@ -162,108 +220,12 @@ export const useSyncContext = () => {
   return context;
 };
 
-export const useSyncTrigger = (context = useSyncContext()) => {
-  const {
-    setBusy,
-    setOnline,
-    busy: isBusy,
-    syncTables,
-    onSyncEvent,
-    busyRef,
-    setLastSyncTime,
-  } = context;
-  const syncTablesF = syncTables();
-
-  const triggerSync = useCallback(async () => {
-    onSyncEvent({ type: "verbose", message: "Sync try" });
-    let success = false;
-
-    if (busyRef.current) {
-      onSyncEvent({ type: "sync-ignored", reason: "Sync already in progress" });
-      return false;
-    }
-
-    if (!syncTablesF) {
-      onSyncEvent({ type: "sync-ignored", reason: "Sync disabled" });
-      return false;
-    }
-
-    onSyncEvent({ type: "sync-start" });
-    busyRef.current = true;
-    setBusy(true);
-
-    try {
-      await syncTablesF(context);
-      onSyncEvent({ type: "user", message: "Synchronized" });
-      setOnline(true);
-      success = true;
-    } catch (e) {
-      onSyncEvent({ type: "user", message: "Offline" });
-      onSyncEvent({
-        type: "error",
-        error: e instanceof Error ? e : new Error(`${e}`),
-      });
-      setOnline(false);
-      success = false;
-    } finally {
-      setBusy(false);
-      busyRef.current = false;
-      onSyncEvent({ type: "sync-end", success });
-      setLastSyncTime(Math.floor(Date.now() / 1000));
-    }
-
-    return success;
-  }, [syncTablesF, setBusy, setOnline, onSyncEvent, busyRef, setLastSyncTime]);
-
-  return syncTablesF && !isBusy ? triggerSync : undefined;
+export const useSyncTrigger = () => {
+  const { trigger, abort } = useSyncContext();
+  return { trigger, abort };
 };
 
 export const useSyncMode = () => {
   const { online, busy, lastSyncTime } = useSyncContext();
   return { online, busy, lastSyncTime };
-};
-
-export const useIntervalSync = (context = useSyncContext()) => {
-  const { syncIntervalSeconds, onSyncEvent } = context;
-  const triggerSync = useSyncTrigger(context);
-
-  useEffect(() => {
-    if (triggerSync && syncIntervalSeconds && syncIntervalSeconds > 0) {
-      onSyncEvent({
-        type: "interval-setup",
-        intervalSeconds: syncIntervalSeconds,
-      });
-      const intervalId = setInterval(triggerSync, syncIntervalSeconds * 1000);
-      return () => {
-        onSyncEvent({ type: "interval-cleared" });
-        clearInterval(intervalId);
-      };
-    } else {
-      if (syncIntervalSeconds && syncIntervalSeconds <= 0) {
-        onSyncEvent({
-          type: "verbose",
-          message:
-            "syncIntervalSeconds should be greater than 0 to enable auto sync.",
-        });
-      }
-    }
-  }, [triggerSync, syncIntervalSeconds, onSyncEvent]);
-};
-
-export const useEventSync = (
-  condition = false,
-  context = useSyncContext(),
-  triggerSync = useSyncTrigger(context),
-) => {
-  const { onSyncEvent } = context;
-  useEffect(() => {
-    if (condition && triggerSync) {
-      onSyncEvent({
-        type: "verbose",
-        message: "Performing sync due to event.",
-      });
-      triggerSync();
-    }
-  }, [condition, triggerSync, onSyncEvent]);
-  return triggerSync;
 };
