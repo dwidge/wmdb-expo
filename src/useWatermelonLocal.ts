@@ -195,7 +195,10 @@ export const useWatermelonLocal = <
     (await deleteItems([item]))[0]!;
 
   const useSetItem =
-    ({ id, ...filter }: PT = {} as PT): AsyncDispatch<PT | null> | undefined =>
+    (
+      { id, ...filter }: PT = {} as PT,
+      preUpdate = usePreUpdate(),
+    ): AsyncDispatch<PT | null> | undefined =>
     async (
       v: React.SetStateAction<PT | null>,
       next = typeof v === "function"
@@ -203,20 +206,29 @@ export const useWatermelonLocal = <
         : v,
     ) =>
       next != null
-        ? updateItem({ id, ...next, ...dropUndefined(filter) })
+        ? updateItem(preUpdate({ id, ...next, ...dropUndefined(filter) }))
         : id
-          ? deleteItem({ id } as PT)
+          ? deleteItem(preUpdate({ id } as PT))
           : null;
 
   const deleteItemWmdbSingle = async (item: PT) =>
     (await deleteItemsWmdb([item]))[0];
 
-  const useCreateItem = (filter?: PT) =>
+  const useCreateItem = (filter?: PT, preUpdate = usePreUpdate()) =>
     filter
-      ? (item: PT) => createItem({ ...item, ...dropUndefined(filter) })
+      ? (item: PT) =>
+          createItem(preUpdate({ ...item, ...dropUndefined(filter) }))
       : createItem;
-  const useUpdateItem = () => updateItem;
-  const useDeleteItem = () => deleteItem;
+  const useUpdateItem =
+    (
+      preUpdate = usePreUpdate(),
+    ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
+    (v) =>
+      updateItem(preUpdate(v));
+  const useDeleteItem =
+    (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
+    (v) =>
+      deleteItem(preUpdate(v));
 
   const createItems = async (items: PT[]): Promise<PT[]> => {
     let created: PT[] = [];
