@@ -10,12 +10,17 @@ import {
   QueryOptions,
   StringKey,
 } from "@dwidge/crud-api-react";
-import { AsyncDispatch, AsyncState, useMemoValue } from "@dwidge/hooks-react";
+import {
+  AsyncDispatch,
+  AsyncState,
+  useDeepMemo,
+  useMemoValue,
+} from "@dwidge/hooks-react";
 import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q } from "@nozbe/watermelondb";
-import { useMemo, useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
@@ -86,40 +91,53 @@ export const useWatermelonLocal = <
     return conditions;
   };
 
+  const warnTooManyItems = (
+    v: any[] | undefined,
+    filter: any,
+    columns: string[],
+    wmdbQuery?: Q.Where[],
+  ) => {
+    if (v && v.length > 500)
+      console.warn(
+        "warnTooManyItemsE1: More than 500 items returned by query. Fix the query or add offset and limit to improve performance.",
+        { table, filter, columns, wmdbQuery },
+        v.slice(0, 3),
+      );
+  };
+
   const useGetList = (
     filter?: ApiFilterObject<T>,
     { columns = defaultGetColumns, ...options }: QueryOptions<K> = {},
+    filterMemo = useDeepMemo(filter),
+    columnsMemo = useDeepMemo(columns),
+    optionsMemo = useDeepMemo(options),
+    wmdbQuery = useMemo(() => {
+      if (filterMemo) {
+        const isFetchingDeletedAtColumn = columnsMemo.includes(
+          "deletedAt" as StringKey<T>,
+        );
+        const excludeDeletedItems = { deletedAt: null };
+        const deletedItemFilter = isFetchingDeletedAtColumn
+          ? {}
+          : excludeDeletedItems;
+        return buildQueryConditions({
+          ...deletedItemFilter,
+          ...filterMemo,
+        } as ApiFilterObject<T>);
+      }
+    }, [filterMemo, columnsMemo]),
+    wmdbOptions = useMemo(
+      () => ({ columns: columnsMemo, ...optionsMemo }) as any,
+      [columnsMemo, optionsMemo],
+    ),
   ): PT[] | undefined => (
-    assert(Array.isArray(columns), "useGetListE1"),
+    assert(Array.isArray(columnsMemo), "useGetListE1"),
     useMemoValue(
       (v, filter) => (
-        v && v.length > 500
-          ? console.warn(
-              "useGetListE2: More than 500 items returned by query. Fix the query or add offset and limit to improve performance.",
-              { filter, columns },
-            )
-          : {},
+        warnTooManyItems(v, filter, columnsMemo, wmdbQuery),
         filter ? v?.map(parse) : undefined
       ),
-      [
-        useWmdbQuery<W>(
-          table,
-          useMemo(() => {
-            const conditions = buildQueryConditions({
-              deletedAt: columns.includes("deletedAt" as StringKey<T>)
-                ? undefined
-                : null,
-              ...filter,
-            } as ApiFilterObject<T>);
-            return conditions.length > 0 ? conditions : [Q.where("id", null)];
-          }, [JSON.stringify(filter ?? null), JSON.stringify(columns)]),
-          useMemo(
-            () => ({ columns, ...options }) as any,
-            [JSON.stringify({ columns, ...options })],
-          ),
-        ),
-        JSON.stringify(filter ?? null),
-      ] as const,
+      [useWmdbQuery<W>(table, wmdbQuery, wmdbOptions), filterMemo] as const,
     )
   );
 
@@ -155,10 +173,9 @@ export const useWatermelonLocal = <
     filter?: T,
     { columns = defaultGetColumns } = {},
   ): PT | null | undefined =>
-    useMemoValue(
-      (v, filter) => (v === undefined ? undefined : (v[0] ?? null)),
-      [useGetList(filter, { columns }), JSON.stringify(filter)] as const,
-    );
+    useMemoValue((v) => (v === undefined ? undefined : (v[0] ?? null)), [
+      useGetList(filter, { columns }),
+    ] as const);
 
   const createItem = async (item: PT): Promise<PT> =>
     (await createItems([item]))[0]!;
@@ -299,15 +316,19 @@ export const useWatermelonLocal = <
   };
 
   const useCount = (filter?: Partial<T>): number | undefined => {
+    const filterMemo = useDeepMemo(filter);
     const [count, setCount] = useState<number | undefined>(undefined);
 
     useEffect(() => {
       let isMounted = true;
       const fetchCount = async () => {
         try {
+          const deletedItemsFilter = {
+            deletedAt: null,
+          };
           const conditions = buildQueryConditions({
-            deletedAt: filter?.deletedAt ?? null,
-            ...filter,
+            ...deletedItemsFilter,
+            ...filterMemo,
           } as ApiFilterObject<T>);
           const collection = database.get<W>(table);
           const fetchedCount = await collection
@@ -329,7 +350,7 @@ export const useWatermelonLocal = <
       return () => {
         isMounted = false;
       };
-    }, [database, table, JSON.stringify(filter)]);
+    }, [database, table, filterMemo]);
 
     return count;
   };

@@ -2,7 +2,7 @@
 // Distributed under the Boost Software License, Version 1.0.
 // https://www.boost.org/LICENSE_1_0.txt
 
-import { AsyncIntervalProvider, useAsyncInterval } from "@dwidge/hooks-react";
+import { useAsyncInterval } from "@dwidge/hooks-react";
 import {
   createContext,
   PropsWithChildren,
@@ -121,6 +121,13 @@ export const SyncProvider: React.FC<
   onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
 }) => {
+  
+  const parentContext = useContext(SyncContext);
+  if (parentContext)
+    console.warn(
+      "SyncProviderW1: There are multiple SyncProviders in your app.",
+    );
+
   const triggerSync: (signal: AbortSignal) => Promise<boolean> = useCallback(
     async (signal: AbortSignal) => {
       if (!syncTables) {
@@ -159,31 +166,12 @@ export const SyncProvider: React.FC<
     [syncTables, onSyncEvent],
   );
 
-  return (
-    <AsyncIntervalProvider
-      intervalSeconds={syncIntervalSeconds}
-      asyncFn={triggerSync}
-      defaultArg={undefined}
-    >
-      <SyncProviderInner onSyncEvent={onSyncEvent}>
-        {children}
-      </SyncProviderInner>
-    </AsyncIntervalProvider>
-  );
-};
-
-const SyncProviderInner: React.FC<
-  PropsWithChildren<{ onSyncEvent: OnSyncEvent }>
-> = ({ children, onSyncEvent }) => {
-  const {
-    lastRunTime,
-    lastResult,
-    lastError,
-    isRunning,
-    trigger,
-    abort,
-    intervalSeconds,
-  } = useAsyncInterval<undefined, boolean>();
+  const { id, lastRunTime, lastResult, lastError, isRunning, trigger, abort } =
+    useAsyncInterval<undefined, boolean, typeof triggerSync>(
+      syncIntervalSeconds,
+      triggerSync,
+      undefined,
+    );
 
   const online = !lastError && !!lastResult && !!lastRunTime;
 
@@ -195,7 +183,7 @@ const SyncProviderInner: React.FC<
       abort,
       onSyncEvent,
       lastSyncTime: lastRunTime,
-      syncIntervalSeconds: intervalSeconds,
+      syncIntervalSeconds: syncIntervalSeconds,
     }),
     [
       isRunning,
@@ -204,10 +192,11 @@ const SyncProviderInner: React.FC<
       abort,
       onSyncEvent,
       lastRunTime,
-      trigger,
-      intervalSeconds,
+      syncIntervalSeconds,
     ],
   );
+
+  // console.log("SyncProvider1", id);
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
 };

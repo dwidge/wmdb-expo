@@ -21,38 +21,51 @@ import { useEffect, useState } from "react";
  */
 export const useWmdbQuery = <T extends Model>(
   tableName: TableName<T>,
-  query: Q.Clause[] = [],
+  query?: Q.Clause[],
   options: QueryOptions<StringKey<T>> = {},
 ): T[] | undefined => {
-  const [items, setItems] = useState<T[]>();
+  const warnColumnsEmpty = <T extends Model>(columns?: StringKey<T>[]) => {
+    if (!columns || !columns.length)
+      console.warn(
+        "warnColumnsEmptyE1: No columns to watch. Changes will not cause updates.",
+        { tableName, columns },
+      );
+  };
+
+  const [items, setItems] = useState<T[] | undefined>();
   const db = useDatabase();
 
   useEffect(() => {
-    let enhancedQuery = db.get<T>(tableName).query(query);
+    if (!query) {
+      setItems(undefined);
+    } else {
+      let enhancedQuery = db.get<T>(tableName).query(query);
 
-    if (options.order) {
-      options.order.forEach(([column, direction]) => {
-        enhancedQuery = enhancedQuery.extend(
-          Q.sortBy(column, direction === "ASC" ? Q.asc : Q.desc),
-        );
-      });
+      if (options.order) {
+        options.order.forEach(([column, direction]) => {
+          enhancedQuery = enhancedQuery.extend(
+            Q.sortBy(column, direction === "ASC" ? Q.asc : Q.desc),
+          );
+        });
+      }
+
+      if (options.limit !== undefined) {
+        enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
+        if (options.offset !== undefined)
+          enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
+      }
+
+      warnColumnsEmpty(options.columns);
+      const columnsToObserve = options.columns || ["id" as StringKey<T>];
+
+      const subscription = enhancedQuery
+        .observeWithColumns(columnsToObserve)
+        .subscribe((items) => setItems(items.map((v: any) => v._raw)));
+
+      return () => {
+        subscription.unsubscribe();
+      };
     }
-
-    if (options.limit !== undefined) {
-      enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
-      if (options.offset !== undefined)
-        enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
-    }
-
-    const columnsToObserve = options.columns || ["id"];
-
-    const subscription = enhancedQuery
-      .observeWithColumns(columnsToObserve)
-      .subscribe((items) => setItems(items.map((v: any) => v._raw)));
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, [db, query, options]);
 
   return items;
