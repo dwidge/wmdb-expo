@@ -38,6 +38,7 @@ export const useWatermelonLocal = <
   PK = Pick<T, "id">,
 >(
   parse: ParseItem<Partial<T>>,
+  usePreUpdate: () => ParseItem<Partial<T>>,
   allColumns: string[],
   table: string,
   database: Database,
@@ -141,16 +142,26 @@ export const useWatermelonLocal = <
     )
   );
 
-  const useSetList = (filter?: PT) => (items: PT[]) =>
-    updateItems(
-      items.map((v) => parse({ ...v, ...dropUndefined(filter ?? {}) })),
-    );
-  const useCreateList = (filter?: PT) => (items: PT[]) =>
-    createItems(
-      items.map((v) => parse({ ...v, ...dropUndefined(filter ?? {}) })),
-    );
-  const useUpdateList = () => (items: PT[]) => updateItems(items.map(parse));
-  const useDeleteList = () => (items: PT[]) => deleteItems(items.map(parse));
+  const useSetList =
+    (filter?: PT, preUpdate = usePreUpdate()) =>
+    (items: PT[]) =>
+      updateItems(
+        items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+      );
+  const useCreateList =
+    (filter?: PT, preUpdate = usePreUpdate()) =>
+    (items: PT[]) =>
+      createItems(
+        items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+      );
+  const useUpdateList =
+    (preUpdate = usePreUpdate()) =>
+    (items: PT[]) =>
+      updateItems(items.map(preUpdate));
+  const useDeleteList =
+    (preUpdate = usePreUpdate()) =>
+    (items: PT[]) =>
+      deleteItems(items.map(preUpdate));
 
   const useItem = (
     filter?: T,
@@ -218,7 +229,7 @@ export const useWatermelonLocal = <
             mergeObject(v, {
               createdAt2: getUnixTimestamp(),
               updatedAt2: getUnixTimestamp(),
-              ...item,
+              ...parse(item),
             })
           ),
         ),
@@ -241,7 +252,7 @@ export const useWatermelonLocal = <
                   (v) => (
                     mergeObject(v, {
                       updatedAt2: getUnixTimestamp(),
-                      ...item,
+                      ...parse(item),
                     }),
                     v
                   ),
@@ -292,7 +303,7 @@ export const useWatermelonLocal = <
   const deleteItems = async (items: PT[]) =>
     updateItems(
       items.map((v) => ({
-        ...parse(v),
+        ...v,
         deletedAt2: getUnixTimestamp(),
       })),
     );
