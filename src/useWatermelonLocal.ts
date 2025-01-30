@@ -206,29 +206,30 @@ export const useWatermelonLocal = <
         : v,
     ) =>
       next != null
-        ? updateItem(preUpdate({ id, ...next, ...dropUndefined(filter) }))
+        ? updateItem(
+            parse(preUpdate({ id, ...next, ...dropUndefined(filter) })),
+          )
         : id
-          ? deleteItem(preUpdate({ id } as PT))
+          ? deleteItem(parse(preUpdate({ id } as PT)))
           : null;
 
   const deleteItemWmdbSingle = async (item: PT) =>
     (await deleteItemsWmdb([item]))[0];
 
-  const useCreateItem = (filter?: PT, preUpdate = usePreUpdate()) =>
-    filter
-      ? (item: PT) =>
-          createItem(preUpdate({ ...item, ...dropUndefined(filter) }))
-      : createItem;
+  const useCreateItem =
+    (filter?: PT, preUpdate = usePreUpdate()) =>
+    (item: PT) =>
+      createItem(parse(preUpdate({ ...item, ...dropUndefined(filter ?? {}) })));
   const useUpdateItem =
     (
       preUpdate = usePreUpdate(),
     ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
     (v) =>
-      updateItem(preUpdate(v));
+      updateItem(parse(preUpdate(v)));
   const useDeleteItem =
     (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
     (v) =>
-      deleteItem(preUpdate(v));
+      deleteItem(parse(preUpdate(v)));
 
   const createItems = async (items: PT[]): Promise<PT[]> => {
     let created: PT[] = [];
@@ -264,7 +265,7 @@ export const useWatermelonLocal = <
                   (v) => (
                     mergeObject(v, {
                       updatedAt2: getUnixTimestamp(),
-                      ...parse(item),
+                      ...item,
                     }),
                     v
                   ),
