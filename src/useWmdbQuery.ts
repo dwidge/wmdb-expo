@@ -11,7 +11,7 @@ import { useDatabase } from "@nozbe/watermelondb/react";
 import { useEffect, useState } from "react";
 
 /**
- * A custom hook to query items from the WatermelonDB database.
+ * A hook to query items from the WatermelonDB database.
  *
  * @template T - The type of the model.
  * @param {TableName<T>} tableName - The name of the table to query.
@@ -69,4 +69,46 @@ export const useWmdbQuery = <T extends Model>(
   }, [db, query, options]);
 
   return items;
+};
+
+/**
+ * A hook to observe the count of items from the WatermelonDB database.
+ *
+ * @template T - The type of the model.
+ * @param {TableName<T>} tableName - The name of the table to query.
+ * @param {Q.Clause[]} [query=[]] - An array of query clauses.
+ * @param {QueryOptions} [options={}] - An object containing query options. (Note: order, columns are ignored for count)
+ * @returns {number | undefined} - The count of items or undefined.
+ */
+export const useWmdbCount = <T extends Model>(
+  tableName: TableName<T>,
+  query?: Q.Clause[],
+  options: QueryOptions<StringKey<T>> = {},
+): number | undefined => {
+  const [count, setCount] = useState<number | undefined>();
+  const db = useDatabase();
+
+  useEffect(() => {
+    if (!query) {
+      setCount(undefined);
+    } else {
+      let enhancedQuery = db.get<T>(tableName).query(query);
+
+      if (options.limit !== undefined) {
+        enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
+        if (options.offset !== undefined)
+          enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
+      }
+
+      const subscription = enhancedQuery
+        .observeCount()
+        .subscribe((count) => setCount(count));
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [db, query, options]);
+
+  return count;
 };

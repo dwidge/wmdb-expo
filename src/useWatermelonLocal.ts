@@ -20,8 +20,8 @@ import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q } from "@nozbe/watermelondb";
-import { useEffect, useMemo, useState } from "react";
-import { useWmdbQuery } from "./useWmdbQuery.js";
+import { useMemo } from "react";
+import { useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
 export type AssertItem<T> = ConvertItem<T, T>;
@@ -340,42 +340,18 @@ export const useWatermelonLocal = <
 
   const useCount = (filter?: Partial<T>): number | undefined => {
     const filterMemo = useDeepMemo(filter);
-    const [count, setCount] = useState<number | undefined>(undefined);
 
-    useEffect(() => {
-      let isMounted = true;
-      const fetchCount = async () => {
-        try {
-          const deletedItemsFilter = {
-            deletedAt: null,
-          };
-          const conditions = buildQueryConditions({
-            ...deletedItemsFilter,
-            ...filterMemo,
-          } as ApiFilterObject<T>);
-          const collection = database.get<W>(table);
-          const fetchedCount = await collection
-            .query(...conditions)
-            .fetchCount();
-          if (isMounted) {
-            setCount(fetchedCount);
-          }
-        } catch (error) {
-          console.error("Error fetching count:", error);
-          if (isMounted) {
-            setCount(undefined);
-          }
-        }
-      };
+    const wmdbQuery = useMemo(() => {
+      if (filterMemo) {
+        const excludeDeletedItems = { deletedAt: null };
+        return buildQueryConditions({
+          ...excludeDeletedItems,
+          ...filterMemo,
+        } as ApiFilterObject<T>);
+      }
+    }, [filterMemo]);
 
-      fetchCount();
-
-      return () => {
-        isMounted = false;
-      };
-    }, [database, table, filterMemo]);
-
-    return count;
+    return useWmdbCount<W>(table, wmdbQuery);
   };
 
   return {
