@@ -16,3 +16,16 @@ export const fetchItemsInChunks = async <T extends ApiRecord>(
 
   return items;
 };
+
+export const pushItemsInChunks = async <T, R>(
+  items: T[],
+  chunkSize: number,
+  processChunk: (chunk: T[]) => Promise<R>,
+) => {
+  let offset = 0;
+  while (offset < items.length) {
+    const chunk = items.slice(offset, offset + chunkSize);
+    await processChunk(chunk);
+    offset += chunkSize;
+  }
+};

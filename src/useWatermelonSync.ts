@@ -6,7 +6,7 @@ import { ApiWmdbItem1, ExtendedApi, Fetch } from "@dwidge/crud-api-react";
 import { groupBy, unixSeconds } from "@dwidge/utils-js";
 import { SyncPullArgs, SyncPushArgs } from "@nozbe/watermelondb/sync";
 import { OnSyncEvent } from "./Sync.js";
-import { fetchItemsInChunks } from "./fetchItemsInChunks.js";
+import { fetchItemsInChunks, pushItemsInChunks } from "./fetchItemsInChunks.js";
 import { ParseItem } from "./useWatermelonLocal.js";
 
 export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
@@ -97,6 +97,7 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
     onSyncEvent?: OnSyncEvent,
   ) => {
     const api = useApi(fetch);
+    const limit = 100;
     const { created = [], updated = [], deleted = [] } = changes[table] || {};
 
     onSyncEvent?.({
@@ -113,9 +114,14 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
     const updates = updated.map(parse);
     const deletes = deleted.map((id) => ({ id })).map(parse);
 
-    if (creates.length > 0) await api.createList(creates);
-    if (updates.length > 0) await api.updateList(updates);
-    if (deleted.length > 0) await api.deleteList(deletes);
+    if (creates.length > 0)
+      await pushItemsInChunks(creates, limit, (chunk) => api.createList(chunk));
+
+    if (updates.length > 0)
+      await pushItemsInChunks(updates, limit, (chunk) => api.updateList(chunk));
+
+    if (deletes.length > 0)
+      await pushItemsInChunks(deletes, limit, (chunk) => api.deleteList(chunk));
   };
 
   return {
