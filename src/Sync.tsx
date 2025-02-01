@@ -139,12 +139,12 @@ export const SyncProvider: React.FC<
         try {
           await syncTables(signal, onSyncEvent);
           onSyncEvent({ type: "sync-end", success: true });
-          onSyncEvent({ type: "user", message: "Synchronized" });
+          onSyncEvent({ type: "user", message: "Sync completed" });
           return true;
         } catch (e) {
           onSyncEvent({ type: "sync-end", success: false });
           if (signal.aborted) {
-            onSyncEvent({ type: "user", message: "Cancelled" });
+            onSyncEvent({ type: "user", message: "Sync cancelled" });
             return true;
           } else {
             if (
