@@ -3,7 +3,7 @@
 // https://www.boost.org/LICENSE_1_0.txt
 
 import { useAsyncInterval } from "@dwidge/hooks-react";
-import {
+import React, {
   createContext,
   PropsWithChildren,
   useCallback,
@@ -113,6 +113,7 @@ export const SyncProvider: React.FC<
         signal: AbortSignal,
         onSyncEvent: OnSyncEvent,
       ) => Promise<void>;
+      enable?: boolean;
     }
   >
 > = ({
@@ -120,8 +121,8 @@ export const SyncProvider: React.FC<
   syncTables = syncTablesMock,
   onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
+  enable,
 }) => {
-  
   const parentContext = useContext(SyncContext);
   if (parentContext)
     console.warn(
@@ -171,6 +172,7 @@ export const SyncProvider: React.FC<
       syncIntervalSeconds,
       triggerSync,
       undefined,
+      enable,
     );
 
   const online = !lastError && !!lastResult && !!lastRunTime;
