@@ -71,13 +71,18 @@ export const useWatermelonLocal = <
         const orConditions: Q.Where[] = [];
 
         for (const v of values) {
-          if (typeof v === "object" && v !== null && "range" in v) {
-            const [lower, upper] = v.range;
+          if (typeof v === "object" && v !== null && "$range" in v) {
+            const [lower, upper] = v.$range;
             if (lower != undefined) {
               orConditions.push(Q.where(key, Q.gte(lower)));
             }
             if (upper != undefined) {
               orConditions.push(Q.where(key, Q.lt(upper)));
+            }
+          } else if (typeof v === "object" && v !== null && "$not" in v) {
+            const notValue = v.$not;
+            if (notValue !== undefined) {
+              orConditions.push(Q.where(key, Q.notEq(notValue)));
             }
           } else if (v !== undefined) {
             orConditions.push(Q.where(key, v));
