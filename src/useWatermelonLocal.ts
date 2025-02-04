@@ -167,6 +167,10 @@ export const useWatermelonLocal = <
     (preUpdate = usePreUpdate()) =>
     (items: PT[]) =>
       deleteItems(items.map(preUpdate));
+  const useRestoreList =
+    (preUpdate = usePreUpdate()) =>
+    (items: PT[]) =>
+      restoreItems(items.map(preUpdate));
 
   const useItem = (
     filter?: T,
@@ -198,6 +202,8 @@ export const useWatermelonLocal = <
   // const updateItem = async (item: PT) => (await updateItems([item]))[0];
   const deleteItem = async (item: PT): Promise<PT> =>
     (await deleteItems([item]))[0]!;
+  const restoreItem = async (item: PT): Promise<PT> =>
+    (await restoreItems([item]))[0]!;
 
   const useSetItem =
     (
@@ -235,6 +241,10 @@ export const useWatermelonLocal = <
     (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
     (v) =>
       deleteItem(parse(preUpdate(v)));
+  const useRestoreItem =
+    (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
+    (v) =>
+      restoreItem(parse(preUpdate(v)));
 
   const createItems = async (items: PT[]): Promise<PT[]> => {
     let created: PT[] = [];
@@ -326,6 +336,14 @@ export const useWatermelonLocal = <
       })),
     );
 
+  const restoreItems = async (items: PT[]) =>
+    updateItems(
+      items.map((v) => ({
+        ...v,
+        deletedAt2: null,
+      })),
+    );
+
   const deleteItemsWmdb = async (items: PT[]) => {
     return await database.write(async () => {
       const collection = database.get<W>(table);
@@ -366,12 +384,14 @@ export const useWatermelonLocal = <
     useCreateList,
     useUpdateList,
     useDeleteList,
+    useRestoreList,
     useList,
     useGetItem,
     useSetItem,
     useCreateItem,
     useUpdateItem,
     useDeleteItem,
+    useRestoreItem,
     useItem,
     useCount,
   } as any;
