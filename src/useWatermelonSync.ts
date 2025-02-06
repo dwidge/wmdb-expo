@@ -47,21 +47,21 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
 
     const items = excludeItemsWithInvalidCreatedAtUpdatedAt<T>(newItems, table);
 
+    // console.log("pullChanges1", { lastPulledAt });
+
     const {
       created = [],
       updated = [],
       deleted = [],
     } = groupBy(items, (item) =>
       lastPulledAt
-        ? deletedAfter(lastPulledAt)(item)
-          ? "deleted"
-          : isDeleted(item)
-            ? "ignored"
-            : updatedAfter(lastPulledAt)(item)
-              ? "updated"
-              : createdAfter(lastPulledAt)(item)
-                ? "created"
-                : "ignored"
+        ? updatedAfter(lastPulledAt)(item)
+          ? createdAfter(lastPulledAt)(item)
+            ? "created"
+            : deletedAfter(lastPulledAt)(item)
+              ? "deleted"
+              : "updated"
+          : "ignored"
         : isDeleted(item)
           ? "ignored"
           : "created",
@@ -81,10 +81,8 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
       changes: {
         [table]: {
           created,
-          updated,
-          deleted: deleted
-            .map((v) => v.id)
-            .filter((id): id is string => id != null),
+          updated: [...updated, ...deleted],
+          deleted: [],
         },
       },
       timestamp: unixSeconds(),
