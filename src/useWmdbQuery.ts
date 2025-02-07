@@ -6,9 +6,48 @@
 // https://github.com/Nozbe/WatermelonDB/issues/1796
 
 import { QueryOptions, StringKey } from "@dwidge/crud-api-react";
-import { Model, Q, TableName } from "@nozbe/watermelondb";
+import { Database, Model, Q, Query, TableName } from "@nozbe/watermelondb";
 import { useDatabase } from "@nozbe/watermelondb/react";
 import { useEffect, useState } from "react";
+
+/**
+ * Builds a WatermelonDB query.
+ *
+ * @template T - The type of the model.
+ * @param {Database} database - WatermelonDB database instance.
+ * @param {TableName<T>} tableName - The name of the table to query.
+ * @param {Q.Clause[]} [query=[]] - An array of query clauses.
+ * @param {QueryOptions} [options={}] - An object containing query options.
+ * @returns {Query<T> | undefined} - WatermelonDB query object.
+ */
+export const buildWmdbQuery = <T extends Model>(
+  database: Database,
+  tableName: TableName<T>,
+  query?: Q.Clause[],
+  options: QueryOptions<StringKey<T>> = {},
+): Query<T> | undefined => {
+  if (!query) {
+    return undefined;
+  }
+
+  let enhancedQuery = database.get<T>(tableName).query(query);
+
+  if (options.order) {
+    options.order.forEach(([column, direction]) => {
+      enhancedQuery = enhancedQuery.extend(
+        Q.sortBy(column, direction === "ASC" ? Q.asc : Q.desc),
+      );
+    });
+  }
+
+  if (options.limit !== undefined) {
+    enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
+    if (options.offset !== undefined)
+      enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
+  }
+
+  return enhancedQuery;
+};
 
 /**
  * A hook to query items from the WatermelonDB database.
@@ -38,35 +77,23 @@ export const useWmdbQuery = <T extends Model>(
   useEffect(() => {
     if (!query) {
       setItems(undefined);
-    } else {
-      let enhancedQuery = db.get<T>(tableName).query(query);
-
-      if (options.order) {
-        options.order.forEach(([column, direction]) => {
-          enhancedQuery = enhancedQuery.extend(
-            Q.sortBy(column, direction === "ASC" ? Q.asc : Q.desc),
-          );
-        });
-      }
-
-      if (options.limit !== undefined) {
-        enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
-        if (options.offset !== undefined)
-          enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
-      }
-
-      warnColumnsEmpty(options.columns);
-      const columnsToObserve = options.columns || ["id" as StringKey<T>];
-
-      const subscription = enhancedQuery
-        .observeWithColumns(columnsToObserve)
-        .subscribe((items) => setItems(items.map((v: any) => v._raw)));
-
-      return () => {
-        subscription.unsubscribe();
-      };
+      return;
     }
-  }, [db, query, options]);
+
+    const enhancedQuery = buildWmdbQuery<T>(db, tableName, query, options);
+    if (!enhancedQuery) throw new Error("useWmdbQueryE1");
+
+    warnColumnsEmpty(options.columns);
+    const columnsToObserve = options.columns || ["id" as StringKey<T>];
+
+    const subscription = enhancedQuery
+      .observeWithColumns(columnsToObserve)
+      .subscribe((items) => setItems(items.map((v: any) => v._raw)));
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [db, tableName, query, options]);
 
   return items;
 };
@@ -91,24 +118,20 @@ export const useWmdbCount = <T extends Model>(
   useEffect(() => {
     if (!query) {
       setCount(undefined);
-    } else {
-      let enhancedQuery = db.get<T>(tableName).query(query);
-
-      if (options.limit !== undefined) {
-        enhancedQuery = enhancedQuery.extend(Q.take(options.limit));
-        if (options.offset !== undefined)
-          enhancedQuery = enhancedQuery.extend(Q.skip(options.offset));
-      }
-
-      const subscription = enhancedQuery
-        .observeCount()
-        .subscribe((count) => setCount(count));
-
-      return () => {
-        subscription.unsubscribe();
-      };
+      return;
     }
-  }, [db, query, options]);
+
+    const enhancedQuery = buildWmdbQuery<T>(db, tableName, query, options);
+    if (!enhancedQuery) throw new Error("useWmdbCountE1");
+
+    const subscription = enhancedQuery
+      .observeCount()
+      .subscribe((count) => setCount(count));
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [db, tableName, query, options]);
 
   return count;
 };

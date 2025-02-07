@@ -19,9 +19,9 @@ import {
 import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
-import { Model, Q } from "@nozbe/watermelondb";
+import { Model, Q, TableName } from "@nozbe/watermelondb";
 import { useMemo } from "react";
-import { useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
+import { buildWmdbQuery, useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
 export type AssertItem<T> = ConvertItem<T, T>;
@@ -40,7 +40,7 @@ export const useWatermelonLocal = <
   parse: ParseItem<Partial<T>>,
   usePreUpdate: () => ParseItem<Partial<T>>,
   allColumns: string[],
-  table: string,
+  table: TableName<W>,
   database: Database,
 ): BaseApiHooks<T, PK> => {
   type PT = Partial<T>;
@@ -378,6 +378,45 @@ export const useWatermelonLocal = <
     return useWmdbCount<W>(table, wmdbQuery);
   };
 
+  const get = async (
+    filter?: ApiFilterObject<T>,
+    options?: QueryOptions<StringKey<W>>,
+  ): Promise<PT[] | undefined> => {
+    const wmdbQueryConditions = filter
+      ? buildQueryConditions({
+          deletedAt: null,
+          ...filter,
+        } as ApiFilterObject<T>)
+      : [];
+    const enhancedQuery = buildWmdbQuery<W>(
+      database,
+      table,
+      wmdbQueryConditions,
+      options,
+    );
+
+    if (!enhancedQuery) return undefined;
+
+    const rawItems = await enhancedQuery.fetch();
+    return rawItems.map(parse);
+  };
+
+  const count = async (filter?: Partial<T>): Promise<number | undefined> => {
+    const wmdbQueryConditions = filter
+      ? buildQueryConditions({
+          deletedAt: null,
+          ...filter,
+        } as ApiFilterObject<T>)
+      : [];
+    const enhancedQuery = buildWmdbQuery<W>(
+      database,
+      table,
+      wmdbQueryConditions,
+    );
+    if (!enhancedQuery) return undefined;
+    return enhancedQuery.fetchCount();
+  };
+
   return {
     useGetList,
     useSetList,
@@ -394,5 +433,7 @@ export const useWatermelonLocal = <
     useRestoreItem,
     useItem,
     useCount,
+    get,
+    count,
   } as any;
 };
