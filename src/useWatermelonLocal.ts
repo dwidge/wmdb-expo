@@ -210,19 +210,18 @@ export const useWatermelonLocal = <
       { id, ...filter }: PT = {} as PT,
       preUpdate = usePreUpdate(),
     ): AsyncDispatch<PT | null> | undefined =>
-    async (
-      v: React.SetStateAction<PT | null>,
-      next = typeof v === "function"
+    async (v) => {
+      const next = await (typeof v === "function"
         ? v({ id, ...dropUndefined(filter) } as PT)
-        : v,
-    ) =>
-      next != null
+        : v);
+      return next != null
         ? updateItem(
             parse(preUpdate({ id, ...next, ...dropUndefined(filter) })),
           )
         : id
           ? deleteItem(parse(preUpdate({ id } as PT)))
           : null;
+    };
 
   const deleteItemWmdbSingle = async (item: PT) =>
     (await deleteItemsWmdb([item]))[0];
