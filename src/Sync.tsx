@@ -103,11 +103,6 @@ export interface SyncContextValue {
 
 const SyncContext = createContext<SyncContextValue | undefined>(undefined);
 
-const syncTablesMock = () => async () => {
-  console.log("syncTablesMock1: Syncing tables...");
-  return new Promise<void>((resolve) => setTimeout(resolve, 1000));
-};
-
 export const SyncProvider: React.FC<
   PropsWithChildren<
     Pick<SyncContextValue, "onSyncEvent" | "syncIntervalSeconds"> & {
@@ -121,7 +116,7 @@ export const SyncProvider: React.FC<
   >
 > = ({
   children,
-  syncTables = syncTablesMock,
+  syncTables,
   resetTables,
   onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
@@ -133,43 +128,50 @@ export const SyncProvider: React.FC<
       "SyncProviderW1: There are multiple SyncProviders in your app.",
     );
 
-  const triggerSync: (signal: AbortSignal) => Promise<boolean> = useCallback(
-    async (signal: AbortSignal) => {
-      if (!syncTables) {
-        onSyncEvent({ type: "sync-ignored", reason: "Sync disabled or busy" });
-        return false;
-      } else {
-        onSyncEvent({ type: "sync-start" });
-        try {
-          await syncTables(signal, onSyncEvent);
-          onSyncEvent({ type: "sync-end", success: true });
-          onSyncEvent({ type: "user", message: "Sync completed" });
-          return true;
-        } catch (e) {
-          onSyncEvent({ type: "sync-end", success: false });
-          if (signal.aborted) {
-            onSyncEvent({ type: "user", message: "Sync cancelled" });
-            return true;
-          } else {
-            if (
-              e instanceof Error &&
-              e.message.includes("attachBaseUrlInterceptor")
-            ) {
-              onSyncEvent({ type: "user", message: "Offline" });
-              return false;
-            } else {
-              onSyncEvent({
-                type: "error",
-                error: e instanceof Error ? e : new Error(`${e}`),
-              });
-              throw e;
+  const triggerSync: ((signal: AbortSignal) => Promise<boolean>) | undefined =
+    useMemo(
+      () =>
+        syncTables
+          ? async (signal: AbortSignal) => {
+              if (!syncTables) {
+                onSyncEvent({
+                  type: "sync-ignored",
+                  reason: "Sync disabled or busy",
+                });
+                return false;
+              } else {
+                onSyncEvent({ type: "sync-start" });
+                try {
+                  await syncTables(signal, onSyncEvent);
+                  onSyncEvent({ type: "sync-end", success: true });
+                  onSyncEvent({ type: "user", message: "Sync completed" });
+                  return true;
+                } catch (e) {
+                  onSyncEvent({ type: "sync-end", success: false });
+                  if (signal.aborted) {
+                    onSyncEvent({ type: "user", message: "Sync cancelled" });
+                    return true;
+                  } else {
+                    if (
+                      e instanceof Error &&
+                      e.message.includes("attachBaseUrlInterceptor")
+                    ) {
+                      onSyncEvent({ type: "user", message: "Offline" });
+                      return false;
+                    } else {
+                      onSyncEvent({
+                        type: "error",
+                        error: e instanceof Error ? e : new Error(`${e}`),
+                      });
+                      throw e;
+                    }
+                  }
+                }
+              }
             }
-          }
-        }
-      }
-    },
-    [syncTables, onSyncEvent],
-  );
+          : undefined,
+      [syncTables, onSyncEvent],
+    );
 
   const {
     id,
@@ -238,7 +240,7 @@ export const useSyncTrigger = () => {
   return { trigger, abort, reset };
 };
 
-export const useSyncMode = () => {
+export const useSyncStatus = () => {
   const { online, busy, lastSyncTime } = useSyncContext();
-  return { online, busy, lastSyncTime };
+  return { online, busy, pending: true, lastSyncTime };
 };
