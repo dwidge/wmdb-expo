@@ -3,6 +3,7 @@
 // https://www.boost.org/LICENSE_1_0.txt
 
 import { useAsyncInterval } from "@dwidge/hooks-react";
+import { sleep } from "@dwidge/utils-js";
 import React, {
   createContext,
   PropsWithChildren,
@@ -97,6 +98,7 @@ export interface SyncContextValue {
   abort?: () => void;
   onSyncEvent: OnSyncEvent;
   syncIntervalSeconds?: number;
+  reset?: () => void;
 }
 
 const SyncContext = createContext<SyncContextValue | undefined>(undefined);
@@ -113,12 +115,14 @@ export const SyncProvider: React.FC<
         signal: AbortSignal,
         onSyncEvent: OnSyncEvent,
       ) => Promise<void>;
+      resetTables?: () => Promise<void>;
       enable?: boolean;
     }
   >
 > = ({
   children,
   syncTables = syncTablesMock,
+  resetTables,
   onSyncEvent = makeSyncEventHandler(),
   syncIntervalSeconds = 10,
   enable,
@@ -167,15 +171,31 @@ export const SyncProvider: React.FC<
     [syncTables, onSyncEvent],
   );
 
-  const { id, lastRunTime, lastResult, lastError, isRunning, trigger, abort } =
-    useAsyncInterval<undefined, boolean, typeof triggerSync>(
-      syncIntervalSeconds,
-      triggerSync,
-      undefined,
-      enable,
-    );
+  const {
+    id,
+    lastRunTime,
+    lastResult,
+    lastError,
+    isRunning,
+    trigger,
+    abort,
+    reset,
+  } = useAsyncInterval<undefined, boolean, typeof triggerSync>(
+    syncIntervalSeconds,
+    triggerSync,
+    undefined,
+    enable,
+  );
 
   const online = !lastError && !!lastResult && !!lastRunTime;
+
+  const myReset = useCallback(async () => {
+    await sleep(0);
+    await reset();
+    await sleep(0);
+    await resetTables?.();
+    await sleep(0);
+  }, [reset, resetTables]);
 
   const value: SyncContextValue = useMemo(
     () => ({
@@ -186,6 +206,7 @@ export const SyncProvider: React.FC<
       onSyncEvent,
       lastSyncTime: lastRunTime,
       syncIntervalSeconds: syncIntervalSeconds,
+      reset: myReset,
     }),
     [
       isRunning,
@@ -195,6 +216,7 @@ export const SyncProvider: React.FC<
       onSyncEvent,
       lastRunTime,
       syncIntervalSeconds,
+      myReset,
     ],
   );
 
@@ -212,8 +234,8 @@ export const useSyncContext = () => {
 };
 
 export const useSyncTrigger = () => {
-  const { trigger, abort } = useSyncContext();
-  return { trigger, abort };
+  const { trigger, abort, reset } = useSyncContext();
+  return { trigger, abort, reset };
 };
 
 export const useSyncMode = () => {
