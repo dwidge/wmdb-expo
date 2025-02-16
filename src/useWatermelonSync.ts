@@ -43,8 +43,8 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
   ) => {
     const api = useApi(fetch);
     const limit = 1000;
-    const newItems = (await fetchItemsInChunks(api, limit)).map(parse);
-
+    const rawItems = await fetchItemsInChunks(api, limit);
+    const newItems = rawItems.map(parse);
     const items = excludeItemsWithInvalidCreatedAtUpdatedAt<T>(newItems, table);
 
     // console.log("pullChanges1", { lastPulledAt });
@@ -146,14 +146,26 @@ function excludeItemsWithInvalidCreatedAtUpdatedAt<T extends ApiWmdbItem1>(
   newItems: Partial<T>[],
   table: string,
 ) {
+  checkDates<T>(newItems);
+
   const items = newItems.filter((v) => v.createdAt && v.updatedAt);
   if (items.length < newItems.length)
     console.warn(
-      "pullChangesE1: Column createdAt and updatedAt must not be empty, excluding rows: Table [" +
+      "excludeItemsWithInvalidCreatedAtUpdatedAtW1: Column createdAt and updatedAt must not be empty, excluding rows: Table [" +
         table +
         "] has " +
         (newItems.length - items.length) +
         " invalid rows",
     );
   return items;
+}
+
+function checkDates<T extends ApiWmdbItem1>(items: Partial<T>[]) {
+  const broken = items.filter((r) => !r.createdAt || !r.updatedAt);
+  if (broken.length)
+    console.log(
+      "checkDatesW1: Getting items with no createdAt|updatedAt",
+      broken.length,
+      broken.slice(0, 1),
+    );
 }
