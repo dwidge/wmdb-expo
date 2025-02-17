@@ -70,6 +70,12 @@ export const useWatermelonLocal = <
         const values = Array.isArray(rawValue) ? rawValue : [rawValue];
         const orConditions: Q.Where[] = [];
 
+        if (values.length === 0) {
+          // There are no possible values for this key
+          conditions.push(Q.where("id", Q.eq(null)));
+          break; // Exit the loop after adding the impossible condition
+        }
+
         for (const v of values) {
           if (typeof v === "object" && v !== null && "$range" in v) {
             const [lower, upper] = v.$range;
