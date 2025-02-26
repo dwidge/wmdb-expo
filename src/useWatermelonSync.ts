@@ -8,6 +8,7 @@ import { SyncPullArgs, SyncPushArgs } from "@nozbe/watermelondb/sync";
 import { OnSyncEvent } from "./Sync.js";
 import { fetchItemsInChunks, pushItemsInChunks } from "./fetchItemsInChunks.js";
 import { ParseItem } from "./useWatermelonLocal.js";
+import assert from "assert";
 
 export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
   pullChanges: (
@@ -108,9 +109,18 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
       },
     });
 
-    const creates = created.map(parse);
-    const updates = updated.map(parse);
-    const deletes = deleted.map((id) => ({ id })).map(parse);
+    const sortByUpdatedAsc = (a: Partial<T>, b: Partial<T>) => (
+      assert(a.updatedAt, "sortByUpdatedAscE1"),
+      assert(b.updatedAt, "sortByUpdatedAscE2"),
+      a.updatedAt! - b.updatedAt!
+    );
+
+    const creates = created.map(parse).sort(sortByUpdatedAsc);
+    const updates = updated.map(parse).sort(sortByUpdatedAsc);
+    const deletes = deleted
+      .map((id) => ({ id }))
+      .map(parse)
+      .sort(sortByUpdatedAsc);
 
     if (creates.length > 0)
       await pushItemsInChunks(creates, limit, (chunk) => api.createList(chunk));
