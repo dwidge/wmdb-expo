@@ -24,7 +24,7 @@ export const buildWmdbQuery = <T extends Model>(
   database: Database,
   tableName: TableName<T>,
   query?: Q.Clause[],
-  options: QueryOptions<StringKey<T>> = {},
+  options: QueryOptions<StringKey<T>> & { columns?: StringKey<T>[] } = {},
 ): Query<T> | undefined => {
   if (!query) {
     return undefined;
@@ -35,7 +35,7 @@ export const buildWmdbQuery = <T extends Model>(
   if (options.order) {
     options.order.forEach(([column, direction]) => {
       enhancedQuery = enhancedQuery.extend(
-        Q.sortBy(column, direction === "ASC" ? Q.asc : Q.desc),
+        Q.sortBy(String(column), direction === "ASC" ? Q.asc : Q.desc),
       );
     });
   }
@@ -61,7 +61,7 @@ export const buildWmdbQuery = <T extends Model>(
 export const useWmdbQuery = <T extends Model>(
   tableName: TableName<T>,
   query?: Q.Clause[],
-  options: QueryOptions<StringKey<T>> = {},
+  options: QueryOptions<StringKey<T>> & { columns?: StringKey<T>[] } = {},
 ): T[] | undefined => {
   const warnColumnsEmpty = <T extends Model>(columns?: StringKey<T>[]) => {
     if (!columns || !columns.length)

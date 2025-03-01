@@ -50,7 +50,7 @@ export const useWatermelonLocal = <
 
   const useList = (
     filter?: T,
-    options?: QueryOptions<K>,
+    options?: QueryOptions<K> & { columns?: StringKey<T>[] },
     items = useGetList(filter, options),
     setItems = useSetList(filter),
     delItems = useDeleteList(),
@@ -119,7 +119,10 @@ export const useWatermelonLocal = <
 
   const useGetList = (
     filter?: ApiFilterObject<T>,
-    { columns = defaultGetColumns, ...options }: QueryOptions<K> = {},
+    {
+      columns = defaultGetColumns,
+      ...options
+    }: QueryOptions<K> & { columns?: StringKey<T>[] } = {},
     filterMemo = useDeepMemo(filter),
     columnsMemo = useDeepMemo(columns),
     optionsMemo = useDeepMemo(options),
