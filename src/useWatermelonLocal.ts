@@ -254,7 +254,10 @@ export const useWatermelonLocal = <
     (v) =>
       restoreItem(parse(preUpdate(v)));
 
-  const createItems = async (items: PT[]): Promise<PT[]> => {
+  const createItems = async (
+    items: PT[],
+    name: string = "createItems",
+  ): Promise<PT[]> => {
     let created: PT[] = [];
     await database.write(() => {
       const collection = database.get<W>(table);
@@ -271,29 +274,34 @@ export const useWatermelonLocal = <
         ),
       );
       return database.batch(...preparedCreates);
-    });
+    }, [table, name].join("."));
     return created;
   };
 
-  const updateItem = async ({ id, ...item }: PT): Promise<Partial<T>> =>
+  const updateItem = async (
+    { id, ...item }: PT,
+    name: string = "updateItem",
+  ): Promise<Partial<T>> =>
     id == null
       ? createItem(item as Partial<T>)
       : parse(
-          await database.write(() =>
-            database
-              .get<W>(table)
-              .find(BigIntBase32.parse(id))
-              .then((r) =>
-                r.update(
-                  (v) => (
-                    mergeObject(v, {
-                      updatedAt2: getUnixTimestamp(),
-                      ...item,
-                    }),
-                    v
+          await database.write(
+            () =>
+              database
+                .get<W>(table)
+                .find(BigIntBase32.parse(id))
+                .then((r) =>
+                  r.update(
+                    (v) => (
+                      mergeObject(v, {
+                        updatedAt2: getUnixTimestamp(),
+                        ...item,
+                      }),
+                      v
+                    ),
                   ),
                 ),
-              ),
+            [table, name].join("."),
           ),
         );
 
@@ -306,7 +314,10 @@ export const useWatermelonLocal = <
   };
 
   // error - cant use async await inside database.write()
-  const updateItemsWmdb = async (items: PT[]) => {
+  const updateItemsWmdb = async (
+    items: PT[],
+    name: string = "updateItemsWmdb",
+  ) => {
     let created: PT[] = [];
     await database.write(async () => {
       const records = await database
@@ -332,7 +343,7 @@ export const useWatermelonLocal = <
         );
       });
       return database.batch(...preparedUpdates);
-    });
+    }, [table, name].join("."));
     return created;
   };
 
@@ -352,7 +363,10 @@ export const useWatermelonLocal = <
       })),
     );
 
-  const deleteItemsWmdb = async (items: PT[]) => {
+  const deleteItemsWmdb = async (
+    items: PT[],
+    name: string = "deleteItemsWmdb",
+  ) => {
     return await database.write(async () => {
       const collection = database.get<W>(table);
       const records = await collection
@@ -367,7 +381,7 @@ export const useWatermelonLocal = <
         record.prepareMarkAsDeleted(),
       );
       return database.batch(...preparedDeletes);
-    });
+    }, [table, name].join("."));
   };
 
   const useCount = (filter?: Partial<T>): number | undefined => {
