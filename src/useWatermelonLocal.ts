@@ -406,7 +406,7 @@ export const useWatermelonLocal = <
     if (!enhancedQuery) return undefined;
 
     const rawItems = await enhancedQuery.fetch();
-    return rawItems.map(parse);
+    return rawItems.map((v) => parse(v._raw));
   };
 
   const count = async (filter?: Partial<T>): Promise<number | undefined> => {
