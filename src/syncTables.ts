@@ -29,10 +29,18 @@ export const syncTables = async (
   database: Database,
   tables: WatermelonSync<any>[],
   onSyncEvent: OnSyncEvent,
+  pull = true,
 ) =>
   synchronize({
     database,
     pullChanges: async ({ lastPulledAt, schemaVersion, migration }) => {
+      if (!pull) {
+        return {
+          changes: {},
+          timestamp: lastPulledAt ?? 1,
+        };
+      }
+
       const r = await asyncMap(
         tables,
         async (table, index) => (

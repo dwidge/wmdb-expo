@@ -2,7 +2,7 @@
 // Distributed under the Boost Software License, Version 1.0.
 // https://www.boost.org/LICENSE_1_0.txt
 
-import { useAsyncInterval } from "@dwidge/hooks-react";
+import { useAsyncInterval, useAsyncSemaphore } from "@dwidge/hooks-react";
 import { sleep } from "@dwidge/utils-js";
 import React, {
   createContext,
@@ -94,21 +94,31 @@ export interface SyncContextValue {
   lastSyncTime: Date | null;
   busy: boolean;
   online: boolean;
-  trigger?: () => Promise<boolean>;
+  triggerPull?: () => Promise<boolean>;
+  triggerPush?: () => Promise<boolean>;
   abort?: () => void;
   onSyncEvent: OnSyncEvent;
   syncIntervalSeconds?: number;
+  pushIntervalSeconds?: number;
   reset?: () => void;
 }
 
 const SyncContext = createContext<SyncContextValue | undefined>(undefined);
 
+const isNetworkError = (e: unknown) =>
+  e instanceof Error &&
+  (e.message.includes("pingUrls") || e.message.includes("Network Error"));
+
 export const SyncProvider: React.FC<
   PropsWithChildren<
-    Pick<SyncContextValue, "onSyncEvent" | "syncIntervalSeconds"> & {
+    Pick<
+      SyncContextValue,
+      "onSyncEvent" | "syncIntervalSeconds" | "pushIntervalSeconds"
+    > & {
       syncTables?: (
         signal: AbortSignal,
         onSyncEvent: OnSyncEvent,
+        pull?: boolean,
       ) => Promise<void>;
       resetTables?: () => Promise<void>;
       enable?: boolean;
@@ -119,7 +129,8 @@ export const SyncProvider: React.FC<
   syncTables,
   resetTables,
   onSyncEvent = makeSyncEventHandler(),
-  syncIntervalSeconds = 10,
+  syncIntervalSeconds = 180,
+  pushIntervalSeconds = 10,
   enable,
 }) => {
   const parentContext = useContext(SyncContext);
@@ -128,66 +139,86 @@ export const SyncProvider: React.FC<
       "SyncProviderW1: There are multiple SyncProviders in your app.",
     );
 
-  const triggerSync: ((signal: AbortSignal) => Promise<boolean>) | undefined =
-    useMemo(
-      () =>
-        syncTables
-          ? async (signal: AbortSignal) => {
-              if (!syncTables) {
-                onSyncEvent({
-                  type: "sync-ignored",
-                  reason: "Sync disabled or busy",
-                });
-                return false;
-              } else {
-                onSyncEvent({ type: "sync-start" });
-                try {
-                  await syncTables(signal, onSyncEvent);
-                  onSyncEvent({ type: "sync-end", success: true });
+  const semaphore = useAsyncSemaphore<boolean>(); // Shared semaphore
+
+  const triggerSync:
+    | ((signal: AbortSignal, pull?: boolean) => Promise<boolean>)
+    | undefined = useMemo(
+    () =>
+      syncTables
+        ? async (signal: AbortSignal, pull = true) => {
+            if (!syncTables) {
+              onSyncEvent({
+                type: "sync-ignored",
+                reason: "Sync disabled or busy",
+              });
+              return false;
+            } else {
+              onSyncEvent({ type: "sync-start" });
+              try {
+                await syncTables(signal, onSyncEvent, pull);
+                onSyncEvent({ type: "sync-end", success: true });
+                if (pull)
                   onSyncEvent({ type: "user", message: "Sync completed" });
-                  return true;
-                } catch (e) {
-                  onSyncEvent({ type: "sync-end", success: false });
-                  if (signal.aborted) {
+                return true;
+              } catch (e) {
+                onSyncEvent({ type: "sync-end", success: false });
+                if (signal.aborted) {
+                  if (pull)
                     onSyncEvent({ type: "user", message: "Sync cancelled" });
-                    return true;
+                  return true;
+                } else {
+                  if (isNetworkError(e)) {
+                    if (pull) onSyncEvent({ type: "user", message: "Offline" });
+                    return false;
                   } else {
-                    if (
-                      e instanceof Error &&
-                      e.message.includes("attachBaseUrlInterceptor")
-                    ) {
-                      onSyncEvent({ type: "user", message: "Offline" });
-                      return false;
-                    } else {
-                      onSyncEvent({
-                        type: "error",
-                        error: e instanceof Error ? e : new Error(`${e}`),
-                      });
-                      throw e;
-                    }
+                    onSyncEvent({
+                      type: "error",
+                      error: e instanceof Error ? e : new Error(`${e}`),
+                    });
+                    throw e;
                   }
                 }
               }
             }
-          : undefined,
-      [syncTables, onSyncEvent],
-    );
-
-  const {
-    id,
-    lastRunTime,
-    lastResult,
-    lastError,
-    isRunning,
-    trigger,
-    abort,
-    reset,
-  } = useAsyncInterval<undefined, boolean, typeof triggerSync>(
-    syncIntervalSeconds,
-    triggerSync,
-    undefined,
-    enable,
+          }
+        : undefined,
+    [syncTables, onSyncEvent],
   );
+
+  const triggerSyncPull:
+    | ((signal: AbortSignal) => Promise<boolean>)
+    | undefined = useMemo(
+    () =>
+      triggerSync
+        ? async (signal: AbortSignal) => triggerSync(signal, true)
+        : undefined,
+    [triggerSync],
+  );
+
+  const triggerSyncPush:
+    | ((signal: AbortSignal) => Promise<boolean>)
+    | undefined = useMemo(
+    () =>
+      triggerSync
+        ? async (signal: AbortSignal) => triggerSync(signal, false)
+        : undefined,
+    [triggerSync],
+  );
+
+  const { id, lastResult, lastError, isRunning, abort, reset } = semaphore;
+
+  const { trigger: triggerPull, lastRunTime } = useAsyncInterval<
+    undefined,
+    boolean,
+    typeof triggerSync
+  >(syncIntervalSeconds, triggerSyncPull, undefined, enable, semaphore);
+
+  const { trigger: triggerPush } = useAsyncInterval<
+    undefined,
+    boolean,
+    typeof triggerSyncPush
+  >(pushIntervalSeconds, triggerSyncPush, undefined, enable, semaphore);
 
   const online = !lastError && !!lastResult && !!lastRunTime;
 
@@ -203,21 +234,25 @@ export const SyncProvider: React.FC<
     () => ({
       busy: isRunning,
       online,
-      trigger: trigger ? () => trigger(undefined) : undefined,
+      triggerPull: triggerPull ? () => triggerPull(undefined) : undefined,
+      triggerPush: triggerPush ? () => triggerPush(undefined) : undefined,
       abort,
       onSyncEvent,
       lastSyncTime: lastRunTime,
-      syncIntervalSeconds: syncIntervalSeconds,
+      syncIntervalSeconds,
+      pushIntervalSeconds,
       reset: myReset,
     }),
     [
       isRunning,
       online,
-      trigger,
+      triggerPull,
+      triggerPush,
       abort,
       onSyncEvent,
       lastRunTime,
       syncIntervalSeconds,
+      pushIntervalSeconds,
       myReset,
     ],
   );
@@ -236,8 +271,8 @@ export const useSyncContext = () => {
 };
 
 export const useSyncTrigger = () => {
-  const { trigger, abort, reset } = useSyncContext();
-  return { trigger, abort, reset };
+  const { triggerPull, triggerPush, abort, reset } = useSyncContext();
+  return { trigger: triggerPull, triggerPull, triggerPush, abort, reset };
 };
 
 export const useSyncStatus = () => {
