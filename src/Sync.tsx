@@ -206,13 +206,19 @@ export const SyncProvider: React.FC<
     [triggerSync],
   );
 
-  const { id, lastResult, lastError, isRunning, abort, reset } = semaphore;
+  const { id, lastResult, lastError, isRunning, abort } = semaphore;
 
-  const { trigger: triggerPull, lastRunTime } = useAsyncInterval<
+  const {
+    trigger: triggerPull,
+    lastRunTime,
+    reset,
+  } = useAsyncInterval<undefined, boolean, typeof triggerSync>(
+    syncIntervalSeconds,
+    triggerSyncPull,
     undefined,
-    boolean,
-    typeof triggerSync
-  >(syncIntervalSeconds, triggerSyncPull, undefined, enable, semaphore);
+    enable,
+    semaphore,
+  );
 
   const { trigger: triggerPush } = useAsyncInterval<
     undefined,
