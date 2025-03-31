@@ -48,18 +48,6 @@ export const useWatermelonLocal = <
   assert(Array.isArray(allColumns), "useWatermelonLocalE1");
   const defaultGetColumns = allColumns.filter((v) => v !== "deletedAt") as K[];
 
-  const useList = (
-    filter?: T,
-    options?: QueryOptions<K> & { columns?: StringKey<T>[] },
-    items = useGetList(filter, options),
-    setItems = useSetList(filter),
-    delItems = useDeleteList(),
-  ): [
-    items?: PT[],
-    setItems?: (v: PT[]) => Promise<PT[]>,
-    delItems?: (v: PT[]) => Promise<PT[]>,
-  ] => [items, setItems, delItems];
-
   const buildQueryConditions = <T extends ApiRecord>(
     filter?: ApiFilterObject<T>,
   ): Q.Where[] => {
@@ -117,6 +105,146 @@ export const useWatermelonLocal = <
       );
   };
 
+  const updateItemsWmdb = async (
+    items: PT[],
+    name: string = "updateItemsWmdb",
+  ) => {
+    let created: PT[] = [];
+    await database.write(async () => {
+      const records = await database
+        .get<W>(table)
+        .query(
+          Q.where(
+            "id",
+            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
+          ),
+        )
+        .fetch();
+
+      const preparedUpdates = records.map((record) => {
+        const matchingItem = items.find((item) => item.id === record.id);
+        return record.prepareUpdate(
+          (v) => (
+            created.push(parse({ id: v.id })),
+            mergeObject(v, {
+              updatedAt2: getUnixTimestamp(),
+              ...parse(matchingItem),
+            })
+          ),
+        );
+      });
+      return database.batch(...preparedUpdates);
+    }, [table, name].join("."));
+    return created;
+  };
+
+  const createItems = async (
+    items: PT[],
+    name: string = "createItems",
+  ): Promise<PT[]> => {
+    let created: PT[] = [];
+    await database.write(() => {
+      const collection = database.get<W>(table);
+      const preparedCreates = items.map(parse).map(({ id, ...item }) =>
+        collection.prepareCreate(
+          (v) => (
+            created.push(parse({ id: v.id })),
+            mergeObject(v, {
+              createdAt2: getUnixTimestamp(),
+              updatedAt2: getUnixTimestamp(),
+              ...parse(item),
+            })
+          ),
+        ),
+      );
+      return database.batch(...preparedCreates);
+    }, [table, name].join("."));
+    return created;
+  };
+
+  const createItem = async (item: PT): Promise<PT> =>
+    (await createItems([item]))[0]!;
+
+  const updateItem = async (
+    { id, ...item }: PT,
+    name: string = "updateItem",
+  ): Promise<Partial<T>> =>
+    id == null
+      ? createItem(item as Partial<T>)
+      : parse(
+          await database.write(
+            () =>
+              database
+                .get<W>(table)
+                .find(BigIntBase32.parse(id))
+                .then((r) =>
+                  r.update(
+                    (v) => (
+                      mergeObject(v, {
+                        updatedAt2: getUnixTimestamp(),
+                        ...item,
+                      }),
+                      v
+                    ),
+                  ),
+                ),
+            [table, name].join("."),
+          ),
+        );
+
+  const updateItems = async (items: PT[]) => {
+    const updated: PT[] = [];
+    for (const item of items) {
+      updated.push(await updateItem(item));
+    }
+    return updated;
+  };
+
+  const deleteItems = async (items: PT[]) =>
+    updateItems(
+      items.map((v) => ({
+        ...v,
+        deletedAt2: getUnixTimestamp(),
+      })),
+    );
+
+  const restoreItems = async (items: PT[]) =>
+    updateItems(
+      items.map((v) => ({
+        ...v,
+        deletedAt2: null,
+      })),
+    );
+
+  const deleteItemsWmdb = async (
+    items: PT[],
+    name: string = "deleteItemsWmdb",
+  ) => {
+    return await database.write(async () => {
+      const collection = database.get<W>(table);
+      const records = await collection
+        .query(
+          Q.where(
+            "id",
+            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
+          ),
+        )
+        .fetch();
+      const preparedDeletes = records.map((record) =>
+        record.prepareMarkAsDeleted(),
+      );
+      return database.batch(...preparedDeletes);
+    }, [table, name].join("."));
+  };
+
+  const deleteItem = async (item: PT): Promise<PT> =>
+    (await deleteItems([item]))[0]!;
+  const restoreItem = async (item: PT): Promise<PT> =>
+    (await restoreItems([item]))[0]!;
+
+  const deleteItemWmdbSingle = async (item: PT) =>
+    (await deleteItemsWmdb([item]))[0];
+
   const useGetList = (
     filter?: ApiFilterObject<T>,
     {
@@ -156,47 +284,37 @@ export const useWatermelonLocal = <
     )
   );
 
-  const useSetList =
-    (filter?: PT, preUpdate = usePreUpdate()) =>
-    (items: PT[]) =>
-      updateItems(
-        items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
-      );
-  const useCreateList =
-    (filter?: PT, preUpdate = usePreUpdate()) =>
-    (items: PT[]) =>
-      createItems(
-        items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
-      );
-  const useUpdateList =
-    (preUpdate = usePreUpdate()) =>
-    (items: PT[]) =>
-      updateItems(items.map(preUpdate));
-  const useDeleteList =
-    (preUpdate = usePreUpdate()) =>
-    (items: PT[]) =>
-      deleteItems(items.map(preUpdate));
-  const useRestoreList =
-    (preUpdate = usePreUpdate()) =>
-    (items: PT[]) =>
-      restoreItems(items.map(preUpdate));
-
-  const useItem = (
-    filter?: T,
-    { columns = defaultGetColumns } = {},
-    getItem = useGetItem(filter, { columns }),
-    setItem = useSetItem(filter),
-  ): AsyncState<PT | null> => [
-    getItem,
-    setItem
-      ? (
-          getValue,
-          newValue = typeof getValue === "function"
-            ? getValue(getItem ?? null)
-            : getValue,
-        ) => setItem({ ...getItem, ...newValue } as Partial<T> | null)
-      : undefined,
-  ];
+  const useSetList = (filter?: PT, preUpdate = usePreUpdate()) =>
+    useMemo(
+      () => (items: PT[]) =>
+        updateItems(
+          items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+        ),
+      [preUpdate, filter],
+    );
+  const useCreateList = (filter?: PT, preUpdate = usePreUpdate()) =>
+    useMemo(
+      () => (items: PT[]) =>
+        createItems(
+          items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+        ),
+      [preUpdate, filter],
+    );
+  const useUpdateList = (preUpdate = usePreUpdate()) =>
+    useMemo(
+      () => (items: PT[]) => updateItems(items.map(preUpdate)),
+      [preUpdate],
+    );
+  const useDeleteList = (preUpdate = usePreUpdate()) =>
+    useMemo(
+      () => (items: PT[]) => deleteItems(items.map(preUpdate)),
+      [preUpdate],
+    );
+  const useRestoreList = (preUpdate = usePreUpdate()) =>
+    useMemo(
+      () => (items: PT[]) => restoreItems(items.map(preUpdate)),
+      [preUpdate],
+    );
 
   const useGetItem = (
     filter?: T,
@@ -206,183 +324,80 @@ export const useWatermelonLocal = <
       useGetList(filter, { columns }),
     ] as const);
 
-  const createItem = async (item: PT): Promise<PT> =>
-    (await createItems([item]))[0]!;
-  // const updateItem = async (item: PT) => (await updateItems([item]))[0];
-  const deleteItem = async (item: PT): Promise<PT> =>
-    (await deleteItems([item]))[0]!;
-  const restoreItem = async (item: PT): Promise<PT> =>
-    (await restoreItems([item]))[0]!;
+  const useSetItem = (
+    { id, ...filter }: PT = {} as PT,
+    preUpdate = usePreUpdate(),
+  ): AsyncDispatch<PT | null> | undefined =>
+    useMemo(
+      () => async (v) => {
+        const next = await (typeof v === "function"
+          ? v({ id, ...dropUndefined(filter) } as PT)
+          : v);
+        return next != null
+          ? updateItem(
+              parse(preUpdate({ id, ...next, ...dropUndefined(filter) })),
+            )
+          : id
+            ? deleteItem(parse(preUpdate({ id } as PT)))
+            : null;
+      },
+      [id, filter, preUpdate, parse, updateItem, deleteItem],
+    );
 
-  const useSetItem =
-    (
-      { id, ...filter }: PT = {} as PT,
-      preUpdate = usePreUpdate(),
-    ): AsyncDispatch<PT | null> | undefined =>
-    async (v) => {
-      const next = await (typeof v === "function"
-        ? v({ id, ...dropUndefined(filter) } as PT)
-        : v);
-      return next != null
-        ? updateItem(
-            parse(preUpdate({ id, ...next, ...dropUndefined(filter) })),
-          )
-        : id
-          ? deleteItem(parse(preUpdate({ id } as PT)))
-          : null;
-    };
-
-  const deleteItemWmdbSingle = async (item: PT) =>
-    (await deleteItemsWmdb([item]))[0];
-
-  const useCreateItem =
-    (filter?: PT, preUpdate = usePreUpdate()) =>
-    (item: PT) =>
-      createItem(parse(preUpdate({ ...item, ...dropUndefined(filter ?? {}) })));
-  const useUpdateItem =
-    (
-      preUpdate = usePreUpdate(),
-    ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
-    (v) =>
-      updateItem(parse(preUpdate(v)));
-  const useDeleteItem =
-    (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
-    (v) =>
-      deleteItem(parse(preUpdate(v)));
-  const useRestoreItem =
-    (preUpdate = usePreUpdate()): ((item: Partial<T>) => Promise<Partial<T>>) =>
-    (v) =>
-      restoreItem(parse(preUpdate(v)));
-
-  const createItems = async (
-    items: PT[],
-    name: string = "createItems",
-  ): Promise<PT[]> => {
-    let created: PT[] = [];
-    await database.write(() => {
-      const collection = database.get<W>(table);
-      const preparedCreates = items.map(parse).map(({ id, ...item }) =>
-        collection.prepareCreate(
-          (v) => (
-            created.push(parse({ id: v.id })),
-            mergeObject(v, {
-              createdAt2: getUnixTimestamp(),
-              updatedAt2: getUnixTimestamp(),
-              ...parse(item),
-            })
-          ),
+  const useCreateItem = (
+    filter?: PT,
+    preUpdate = usePreUpdate(),
+    filterMemo = useDeepMemo(filter),
+  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
+    useMemo(
+      () => (item: PT) =>
+        createItem(
+          parse(preUpdate({ ...item, ...dropUndefined(filterMemo ?? {}) })),
         ),
-      );
-      return database.batch(...preparedCreates);
-    }, [table, name].join("."));
-    return created;
-  };
-
-  const updateItem = async (
-    { id, ...item }: PT,
-    name: string = "updateItem",
-  ): Promise<Partial<T>> =>
-    id == null
-      ? createItem(item as Partial<T>)
-      : parse(
-          await database.write(
-            () =>
-              database
-                .get<W>(table)
-                .find(BigIntBase32.parse(id))
-                .then((r) =>
-                  r.update(
-                    (v) => (
-                      mergeObject(v, {
-                        updatedAt2: getUnixTimestamp(),
-                        ...item,
-                      }),
-                      v
-                    ),
-                  ),
-                ),
-            [table, name].join("."),
-          ),
-        );
-
-  const updateItems = async (items: PT[]) => {
-    const updated: PT[] = [];
-    for (const item of items) {
-      updated.push(await updateItem(item));
-    }
-    return updated;
-  };
-
-  // error - cant use async await inside database.write()
-  const updateItemsWmdb = async (
-    items: PT[],
-    name: string = "updateItemsWmdb",
-  ) => {
-    let created: PT[] = [];
-    await database.write(async () => {
-      const records = await database
-        .get<W>(table)
-        .query(
-          Q.where(
-            "id",
-            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
-          ),
-        )
-        .fetch();
-
-      const preparedUpdates = records.map((record) => {
-        const matchingItem = items.find((item) => item.id === record.id);
-        return record.prepareUpdate(
-          (v) => (
-            created.push(parse({ id: v.id })),
-            mergeObject(v, {
-              updatedAt2: getUnixTimestamp(),
-              ...parse(matchingItem),
-            })
-          ),
-        );
-      });
-      return database.batch(...preparedUpdates);
-    }, [table, name].join("."));
-    return created;
-  };
-
-  const deleteItems = async (items: PT[]) =>
-    updateItems(
-      items.map((v) => ({
-        ...v,
-        deletedAt2: getUnixTimestamp(),
-      })),
+      [preUpdate, filterMemo, parse, createItem],
+    );
+  const useUpdateItem = (
+    preUpdate = usePreUpdate(),
+  ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
+    useMemo(
+      () => (v) => updateItem(parse(preUpdate(v))),
+      [preUpdate, parse, updateItem],
+    );
+  const useDeleteItem = (
+    preUpdate = usePreUpdate(),
+  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
+    useMemo(
+      () => (v) => deleteItem(parse(preUpdate(v))),
+      [preUpdate, parse, deleteItem],
+    );
+  const useRestoreItem = (
+    preUpdate = usePreUpdate(),
+  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
+    useMemo(
+      () => (v) => restoreItem(parse(preUpdate(v))),
+      [preUpdate, parse, restoreItem],
     );
 
-  const restoreItems = async (items: PT[]) =>
-    updateItems(
-      items.map((v) => ({
-        ...v,
-        deletedAt2: null,
-      })),
+  const useItem = (
+    filter?: T,
+    { columns = defaultGetColumns } = {},
+    getItem = useGetItem(filter, { columns }),
+    setItem = useSetItem(filter),
+  ): AsyncState<PT | null> =>
+    useMemo(
+      () => [
+        getItem,
+        setItem
+          ? (
+              getValue,
+              newValue = typeof getValue === "function"
+                ? getValue(getItem ?? null)
+                : getValue,
+            ) => setItem({ ...getItem, ...newValue } as Partial<T> | null)
+          : undefined,
+      ],
+      [getItem, setItem],
     );
-
-  const deleteItemsWmdb = async (
-    items: PT[],
-    name: string = "deleteItemsWmdb",
-  ) => {
-    return await database.write(async () => {
-      const collection = database.get<W>(table);
-      const records = await collection
-        .query(
-          Q.where(
-            "id",
-            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
-          ),
-        )
-        .fetch();
-      const preparedDeletes = records.map((record) =>
-        record.prepareMarkAsDeleted(),
-      );
-      return database.batch(...preparedDeletes);
-    }, [table, name].join("."));
-  };
 
   const useCount = (filter?: Partial<T>): number | undefined => {
     const filterMemo = useDeepMemo(filter);
@@ -438,6 +453,18 @@ export const useWatermelonLocal = <
     if (!enhancedQuery) return undefined;
     return enhancedQuery.fetchCount();
   };
+
+  const useList = (
+    filter?: T,
+    options?: QueryOptions<K> & { columns?: StringKey<T>[] },
+    items = useGetList(filter, options),
+    setItems = useSetList(filter),
+    delItems = useDeleteList(),
+  ): [
+    items?: PT[],
+    setItems?: (v: PT[]) => Promise<PT[]>,
+    delItems?: (v: PT[]) => Promise<PT[]>,
+  ] => [items, setItems, delItems];
 
   return {
     useGetList,
