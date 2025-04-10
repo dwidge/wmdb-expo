@@ -44,7 +44,7 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
   ) => {
     const api = useApi(fetch);
     const limit = 1000;
-    const rawItems = await fetchItemsInChunks(api, limit);
+    const rawItems = await fetchItemsInChunks(api, limit, lastPulledAt);
     const newItems = rawItems.map(parse);
     const items = excludeItemsWithInvalidCreatedAtUpdatedAt<T>(newItems, table);
 
