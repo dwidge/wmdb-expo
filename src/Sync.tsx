@@ -321,10 +321,14 @@ export const useSyncTrigger = () => {
  * - `lastSyncTime`: Date of the last successful sync.
  * - `pullProgress`: number (0-1) indicating the progress of the pull phase, or null if not pulling.
  * - `pushProgress`: number (0-1) indicating the progress of the push phase, or null if not pushing.
+ * - `pulling`: boolean indicating if the pull phase is actively in progress.
+ * - `pushing`: boolean indicating if the push phase is actively in progress.
  */
 export const useSyncStatus = () => {
   const { online, busy, lastSyncTime, pullProgress, pushProgress } =
     useSyncContext();
+  const pulling = pullProgress != null && pullProgress > 0 && pullProgress < 1;
+  const pushing = pushProgress != null && pushProgress > 0 && pushProgress < 1;
   return {
     online,
     busy,
@@ -332,5 +336,7 @@ export const useSyncStatus = () => {
     lastSyncTime,
     pullProgress,
     pushProgress,
+    pulling,
+    pushing,
   };
 };
