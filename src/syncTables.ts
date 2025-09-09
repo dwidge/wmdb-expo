@@ -46,6 +46,7 @@ export const syncTables = async (
 
       onSyncEvent({
         type: "progress",
+        stage: "pull",
         progress: 0,
       });
       let completed = 0;
@@ -64,6 +65,7 @@ export const syncTables = async (
           completed++;
           onSyncEvent({
             type: "progress",
+            stage: "pull",
             progress: completed / tables.length,
           });
           return result;
@@ -72,22 +74,30 @@ export const syncTables = async (
       );
       onSyncEvent({
         type: "progress",
+        stage: "pull",
         progress: 1,
       });
       return merge(...r);
     },
     pushChanges: async ({ changes, lastPulledAt }) => {
+      onSyncEvent({
+        type: "progress",
+        stage: "push",
+        progress: 0,
+      });
       let completed = 0;
       await asyncMap(tables, async (table) => {
         await table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent);
         completed++;
         onSyncEvent({
           type: "progress",
+          stage: "push",
           progress: completed / tables.length,
         });
       });
       onSyncEvent({
         type: "progress",
+        stage: "push",
         progress: 1,
       });
     },

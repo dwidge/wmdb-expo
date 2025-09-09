@@ -10,6 +10,7 @@ import React, {
   useCallback,
   useContext,
   useMemo,
+  useState,
 } from "react";
 
 export type SyncStats = { created: number; updated: number; deleted: number };
@@ -58,6 +59,7 @@ export type UserSyncEvent = {
 
 export type ProgressSyncEvent = {
   type: "progress";
+  stage: "pull" | "push";
   progress: number; // 0 to 1
 };
 
@@ -82,7 +84,10 @@ export const makeSyncEventHandler =
       user: (event: UserSyncEvent) =>
         console.log("UserSyncEvent", event.message),
       progress: (e: ProgressSyncEvent) =>
-        console.log("ProgressSyncEvent", `${(e.progress * 100).toFixed(0)}%`),
+        console.log(
+          "ProgressSyncEvent",
+          `${e.stage}: ${(e.progress * 100).toFixed(0)}%`,
+        ),
     },
     catchall: (event: SyncEventType) => void = (event: SyncEventType) =>
       console.log("SyncEvent", event),
@@ -94,6 +99,10 @@ export interface SyncContextValue {
   lastSyncTime: Date | null;
   busy: boolean;
   online: boolean;
+  /** Progress of the pull phase (0 to 1). Null if pull is not part of the current sync. */
+  pullProgress: number | null;
+  /** Progress of the push phase (0 to 1). Null if push is not part of the current sync. */
+  pushProgress: number | null;
   triggerPull?: () => Promise<boolean>;
   triggerPush?: () => Promise<boolean>;
   abort?: () => void;
@@ -128,7 +137,7 @@ export const SyncProvider: React.FC<
   children,
   syncTables,
   resetTables,
-  onSyncEvent = makeSyncEventHandler(),
+  onSyncEvent: onSyncEventProp = makeSyncEventHandler(),
   syncIntervalSeconds = 180,
   pushIntervalSeconds = 10,
   enable,
@@ -139,6 +148,23 @@ export const SyncProvider: React.FC<
       "SyncProviderW1: There are multiple SyncProviders in your app.",
     );
 
+  const [pullProgress, setPullProgress] = useState<number | null>(null);
+  const [pushProgress, setPushProgress] = useState<number | null>(null);
+
+  const onSyncEvent = useCallback(
+    (event: SyncEventType) => {
+      if (event.type === "progress") {
+        if (event.stage === "pull") {
+          setPullProgress(event.progress);
+        } else if (event.stage === "push") {
+          setPushProgress(event.progress);
+        }
+      }
+      onSyncEventProp(event);
+    },
+    [onSyncEventProp],
+  );
+
   const semaphore = useAsyncSemaphore<boolean>(); // Shared semaphore
 
   const triggerSync:
@@ -147,6 +173,8 @@ export const SyncProvider: React.FC<
     () =>
       syncTables
         ? async (signal: AbortSignal, pull = true) => {
+            setPullProgress(pull ? 0 : null);
+            setPushProgress(0);
             if (!syncTables) {
               onSyncEvent({
                 type: "sync-ignored",
@@ -240,6 +268,8 @@ export const SyncProvider: React.FC<
     () => ({
       busy: isRunning,
       online,
+      pullProgress,
+      pushProgress,
       triggerPull: triggerPull ? () => triggerPull(undefined) : undefined,
       triggerPush: triggerPush ? () => triggerPush(undefined) : undefined,
       abort,
@@ -252,6 +282,8 @@ export const SyncProvider: React.FC<
     [
       isRunning,
       online,
+      pullProgress,
+      pushProgress,
       triggerPull,
       triggerPush,
       abort,
@@ -281,7 +313,24 @@ export const useSyncTrigger = () => {
   return { trigger: triggerPull, triggerPull, triggerPush, abort, reset };
 };
 
+/**
+ * A hook to get the current synchronization status.
+ * @returns An object with sync status properties:
+ * - `online`: boolean indicating if the last sync was successful.
+ * - `busy`: boolean indicating if a sync is currently in progress.
+ * - `lastSyncTime`: Date of the last successful sync.
+ * - `pullProgress`: number (0-1) indicating the progress of the pull phase, or null if not pulling.
+ * - `pushProgress`: number (0-1) indicating the progress of the push phase, or null if not pushing.
+ */
 export const useSyncStatus = () => {
-  const { online, busy, lastSyncTime } = useSyncContext();
-  return { online, busy, pending: true, lastSyncTime };
+  const { online, busy, lastSyncTime, pullProgress, pushProgress } =
+    useSyncContext();
+  return {
+    online,
+    busy,
+    pending: true,
+    lastSyncTime,
+    pullProgress,
+    pushProgress,
+  };
 };
