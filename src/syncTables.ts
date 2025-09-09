@@ -3,7 +3,7 @@
 // https://www.boost.org/LICENSE_1_0.txt
 
 import { Fetch } from "@dwidge/crud-api-react";
-import { asyncMap } from "@dwidge/utils-js";
+import { asyncMap, asyncMapParallel } from "@dwidge/utils-js";
 import { Database } from "@nozbe/watermelondb";
 import { synchronize } from "@nozbe/watermelondb/sync";
 import merge from "ts-deepmerge";
@@ -12,7 +12,7 @@ import { WatermelonSync } from "./useWatermelonSync.js";
 
 /**
  * Synchronizes local WatermelonDB tables with a remote API.
- * The order of `tables` is crucial when dealing with foreign key constraints.
+ * The order of `tables` is crucial when dealing with foreign key constraints, especially when concurrency > 1.
  * Tables should be ordered so that referenced tables are synced before the tables that link to them.
  * If tables are pulled/pushed in the wrong order, records with foreign keys to tables that haven't been pulled yet might be rejected.
  * Do not design your database with circular references. (Table A links to Table B and Table B links to Table A)
@@ -22,6 +22,8 @@ import { WatermelonSync } from "./useWatermelonSync.js";
  * @param {Database} database The WatermelonDB database instance.
  * @param {WatermelonSync<any>[]} tables An array of `WatermelonSync` objects, each representing a table to synchronize. The order of this array is important for foreign key constraints.
  * @param {OnSyncEvent} onSyncEvent Callback to send events.
+ * @param {boolean} [pull=true] Whether to pull changes from the remote.
+ * @param {number} [pullConcurrency=1] The number of tables to pull in parallel. Defaults to 1 (sequential).
  * @returns {Promise<void>} A promise that resolves when the synchronization is complete.
  */
 export const syncTables = async (
@@ -30,6 +32,7 @@ export const syncTables = async (
   tables: WatermelonSync<any>[],
   onSyncEvent: OnSyncEvent,
   pull = true,
+  pullConcurrency = 1,
 ) =>
   synchronize({
     database,
@@ -41,14 +44,15 @@ export const syncTables = async (
         };
       }
 
-      const r = await asyncMap(
+      onSyncEvent({
+        type: "progress",
+        progress: 0,
+      });
+      let completed = 0;
+      const r = await asyncMapParallel(
         tables,
-        async (table, index) => (
-          onSyncEvent({
-            type: "progress",
-            progress: index / tables.length,
-          }),
-          table.pullChanges(
+        async (table) => {
+          const result = await table.pullChanges(
             fetch,
             {
               lastPulledAt,
@@ -56,8 +60,15 @@ export const syncTables = async (
               migration,
             },
             onSyncEvent,
-          )
-        ),
+          );
+          completed++;
+          onSyncEvent({
+            type: "progress",
+            progress: completed / tables.length,
+          });
+          return result;
+        },
+        pullConcurrency,
       );
       onSyncEvent({
         type: "progress",
@@ -66,12 +77,14 @@ export const syncTables = async (
       return merge(...r);
     },
     pushChanges: async ({ changes, lastPulledAt }) => {
-      await asyncMap(tables, async (table, index) => {
+      let completed = 0;
+      await asyncMap(tables, async (table) => {
+        await table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent);
+        completed++;
         onSyncEvent({
           type: "progress",
-          progress: index / tables.length,
+          progress: completed / tables.length,
         });
-        await table.pushChanges(fetch, { changes, lastPulledAt }, onSyncEvent);
       });
       onSyncEvent({
         type: "progress",
