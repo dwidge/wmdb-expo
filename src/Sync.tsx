@@ -59,7 +59,8 @@ export type UserSyncEvent = {
 
 export type ProgressSyncEvent = {
   type: "progress";
-  stage: "pull" | "push";
+  /** The synchronization stage, e.g., "pull", "push". Can be extended with custom stages. */
+  stage: string;
   progress: number; // 0 to 1
 };
 
