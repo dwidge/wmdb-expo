@@ -21,6 +21,7 @@ import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q, TableName } from "@nozbe/watermelondb";
 import { useMemo } from "react";
+import { wmdbMetrics } from "./metrics.js";
 import { buildWmdbQuery, useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
@@ -133,6 +134,8 @@ export const useWatermelonLocal = <
           ),
         );
       });
+      wmdbMetrics.writeOperations++;
+      wmdbMetrics.rowsWritten += items.length;
       return database.batch(...preparedUpdates);
     }, [table, name].join("."));
     return created;
@@ -157,6 +160,8 @@ export const useWatermelonLocal = <
           ),
         ),
       );
+      wmdbMetrics.writeOperations++;
+      wmdbMetrics.rowsWritten += items.length;
       return database.batch(...preparedCreates);
     }, [table, name].join("."));
     return created;
@@ -180,6 +185,8 @@ export const useWatermelonLocal = <
                 .then((r) =>
                   r.update(
                     (v) => (
+                      (wmdbMetrics.writeOperations += 1),
+                      (wmdbMetrics.rowsWritten += 1),
                       mergeObject(v, {
                         updatedAt2: getUnixTimestamp(),
                         ...item,
@@ -233,6 +240,8 @@ export const useWatermelonLocal = <
       const preparedDeletes = records.map((record) =>
         record.prepareMarkAsDeleted(),
       );
+      wmdbMetrics.writeOperations++;
+      wmdbMetrics.rowsWritten += items.length;
       return database.batch(...preparedDeletes);
     }, [table, name].join("."));
   };
@@ -435,6 +444,8 @@ export const useWatermelonLocal = <
     if (!enhancedQuery) return undefined;
 
     const rawItems = await enhancedQuery.fetch();
+    wmdbMetrics.readQueries++;
+    wmdbMetrics.rowsRead += rawItems.length;
     return rawItems.map((v) => parse(v._raw));
   };
 
@@ -451,7 +462,8 @@ export const useWatermelonLocal = <
       wmdbQueryConditions,
     );
     if (!enhancedQuery) return undefined;
-    return enhancedQuery.fetchCount();
+    wmdbMetrics.readQueries++;
+    return await enhancedQuery.fetchCount();
   };
 
   const useList = (

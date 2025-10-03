@@ -9,6 +9,7 @@ import { QueryOptions, StringKey } from "@dwidge/crud-api-react";
 import { Database, Model, Q, Query, TableName } from "@nozbe/watermelondb";
 import { useDatabase } from "@nozbe/watermelondb/react";
 import { useEffect, useState } from "react";
+import { wmdbMetrics } from "./metrics.js";
 
 /**
  * Builds a WatermelonDB query.
@@ -88,7 +89,11 @@ export const useWmdbQuery = <T extends Model>(
 
     const subscription = enhancedQuery
       .observeWithColumns(columnsToObserve)
-      .subscribe((items) => setItems(items.map((v: any) => v._raw)));
+      .subscribe((items) => {
+        wmdbMetrics.readQueries++;
+        wmdbMetrics.rowsRead += items.length;
+        setItems(items.map((v: any) => v._raw));
+      });
 
     return () => {
       subscription.unsubscribe();
@@ -124,9 +129,10 @@ export const useWmdbCount = <T extends Model>(
     const enhancedQuery = buildWmdbQuery<T>(db, tableName, query, options);
     if (!enhancedQuery) throw new Error("useWmdbCountE1");
 
-    const subscription = enhancedQuery
-      .observeCount()
-      .subscribe((count) => setCount(count));
+    const subscription = enhancedQuery.observeCount().subscribe((count) => {
+      wmdbMetrics.readQueries++;
+      setCount(count);
+    });
 
     return () => {
       subscription.unsubscribe();
