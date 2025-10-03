@@ -134,8 +134,8 @@ export const useWatermelonLocal = <
           ),
         );
       });
-      wmdbMetrics.writeOperations++;
-      wmdbMetrics.rowsWritten += items.length;
+      wmdbMetrics.write.ops++;
+      wmdbMetrics.write.rows += items.length;
       return database.batch(...preparedUpdates);
     }, [table, name].join("."));
     return created;
@@ -160,8 +160,8 @@ export const useWatermelonLocal = <
           ),
         ),
       );
-      wmdbMetrics.writeOperations++;
-      wmdbMetrics.rowsWritten += items.length;
+      wmdbMetrics.write.ops++;
+      wmdbMetrics.write.rows += items.length;
       return database.batch(...preparedCreates);
     }, [table, name].join("."));
     return created;
@@ -185,8 +185,8 @@ export const useWatermelonLocal = <
                 .then((r) =>
                   r.update(
                     (v) => (
-                      (wmdbMetrics.writeOperations += 1),
-                      (wmdbMetrics.rowsWritten += 1),
+                      (wmdbMetrics.write.ops += 1),
+                      (wmdbMetrics.write.rows += 1),
                       mergeObject(v, {
                         updatedAt2: getUnixTimestamp(),
                         ...item,
@@ -240,8 +240,8 @@ export const useWatermelonLocal = <
       const preparedDeletes = records.map((record) =>
         record.prepareMarkAsDeleted(),
       );
-      wmdbMetrics.writeOperations++;
-      wmdbMetrics.rowsWritten += items.length;
+      wmdbMetrics.write.ops++;
+      wmdbMetrics.write.rows += items.length;
       return database.batch(...preparedDeletes);
     }, [table, name].join("."));
   };
@@ -444,8 +444,8 @@ export const useWatermelonLocal = <
     if (!enhancedQuery) return undefined;
 
     const rawItems = await enhancedQuery.fetch();
-    wmdbMetrics.readQueries++;
-    wmdbMetrics.rowsRead += rawItems.length;
+    wmdbMetrics.read.ops++;
+    wmdbMetrics.read.rows += rawItems.length;
     return rawItems.map((v) => parse(v._raw));
   };
 
@@ -462,7 +462,7 @@ export const useWatermelonLocal = <
       wmdbQueryConditions,
     );
     if (!enhancedQuery) return undefined;
-    wmdbMetrics.readQueries++;
+    wmdbMetrics.read.ops++;
     return await enhancedQuery.fetchCount();
   };
 

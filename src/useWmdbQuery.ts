@@ -90,8 +90,8 @@ export const useWmdbQuery = <T extends Model>(
     const subscription = enhancedQuery
       .observeWithColumns(columnsToObserve)
       .subscribe((items) => {
-        wmdbMetrics.readQueries++;
-        wmdbMetrics.rowsRead += items.length;
+        wmdbMetrics.read.ops++;
+        wmdbMetrics.read.rows += items.length;
         setItems(items.map((v: any) => v._raw));
       });
 
@@ -130,7 +130,7 @@ export const useWmdbCount = <T extends Model>(
     if (!enhancedQuery) throw new Error("useWmdbCountE1");
 
     const subscription = enhancedQuery.observeCount().subscribe((count) => {
-      wmdbMetrics.readQueries++;
+      wmdbMetrics.read.ops++;
       setCount(count);
     });
 

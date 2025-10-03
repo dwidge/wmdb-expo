@@ -1,13 +1,21 @@
 export interface WmdbMetrics {
-  readQueries: number;
-  writeOperations: number;
-  rowsRead: number;
-  rowsWritten: number;
+  read: {
+    ops: number;
+    rows: number;
+  };
+  write: {
+    ops: number;
+    rows: number;
+  };
 }
 
 export const wmdbMetrics: WmdbMetrics = {
-  readQueries: 0,
-  writeOperations: 0,
-  rowsRead: 0,
-  rowsWritten: 0,
+  read: {
+    ops: 0,
+    rows: 0,
+  },
+  write: {
+    ops: 0,
+    rows: 0,
+  },
 };
