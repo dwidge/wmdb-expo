@@ -5,11 +5,10 @@
 // Modified from:
 // https://github.com/Nozbe/WatermelonDB/issues/1796
 
-import { QueryOptions, StringKey } from "@dwidge/crud-api-react";
+import { ApiMetrics, QueryOptions, StringKey } from "@dwidge/crud-api-react";
 import { Database, Model, Q, Query, TableName } from "@nozbe/watermelondb";
 import { useDatabase } from "@nozbe/watermelondb/react";
 import { useEffect, useState } from "react";
-import { wmdbMetrics } from "./metrics.js";
 
 /**
  * Builds a WatermelonDB query.
@@ -63,6 +62,7 @@ export const useWmdbQuery = <T extends Model>(
   tableName: TableName<T>,
   query?: Q.Clause[],
   options: QueryOptions<StringKey<T>> & { columns?: StringKey<T>[] } = {},
+  metrics?: ApiMetrics,
 ): T[] | undefined => {
   const warnColumnsEmpty = <T extends Model>(columns?: StringKey<T>[]) => {
     if (!columns || !columns.length)
@@ -90,8 +90,10 @@ export const useWmdbQuery = <T extends Model>(
     const subscription = enhancedQuery
       .observeWithColumns(columnsToObserve)
       .subscribe((items) => {
-        wmdbMetrics.read.ops++;
-        wmdbMetrics.read.rows += items.length;
+        if (metrics) {
+          metrics.read.ops++;
+          metrics.read.rows += items.length;
+        }
         setItems(items.map((v: any) => v._raw));
       });
 
@@ -116,6 +118,7 @@ export const useWmdbCount = <T extends Model>(
   tableName: TableName<T>,
   query?: Q.Clause[],
   options: QueryOptions<StringKey<T>> = {},
+  metrics?: ApiMetrics,
 ): number | undefined => {
   const [count, setCount] = useState<number | undefined>();
   const db = useDatabase();
@@ -130,7 +133,9 @@ export const useWmdbCount = <T extends Model>(
     if (!enhancedQuery) throw new Error("useWmdbCountE1");
 
     const subscription = enhancedQuery.observeCount().subscribe((count) => {
-      wmdbMetrics.read.ops++;
+      if (metrics) {
+        metrics.read.ops++;
+      }
       setCount(count);
     });
 

@@ -4,6 +4,7 @@
 
 import {
   ApiFilterObject,
+  ApiMetrics,
   ApiRecord,
   assert,
   BaseApiHooks,
@@ -20,8 +21,8 @@ import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { dropUndefined, mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q, TableName } from "@nozbe/watermelondb";
-import React, { createContext, useContext, useMemo } from "react";
-import { wmdbMetrics } from "./metrics.js";
+import React, { createContext, useContext, useMemo, useRef } from "react";
+
 import { buildWmdbQuery, useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
 
 export type ConvertItem<A, D> = (v: A) => D;
@@ -127,6 +128,19 @@ export const useWatermelonLocal = <
   table: TableName<W>,
   database: Database,
 ): BaseApiHooks<T, PK> => {
+  const metricsR = useRef<ApiMetrics>({
+    name: table,
+    read: {
+      ops: 0,
+      rows: 0,
+    },
+    write: {
+      ops: 0,
+      rows: 0,
+    },
+  });
+  const metrics = metricsR.current;
+
   type PT = Partial<T>;
   type K = StringKey<T>;
   assert(Array.isArray(allColumns), "useWatermelonLocalE1");
@@ -145,9 +159,8 @@ export const useWatermelonLocal = <
         const orConditions: Q.Where[] = [];
 
         if (values.length === 0) {
-          // There are no possible values for this key
           conditions.push(Q.where("id", Q.eq(null)));
-          break; // Exit the loop after adding the impossible condition
+          break;
         }
 
         for (const v of values) {
@@ -219,8 +232,8 @@ export const useWatermelonLocal = <
           ),
         );
       });
-      wmdbMetrics.write.ops++;
-      wmdbMetrics.write.rows += items.length;
+      metrics.write.ops++;
+      metrics.write.rows += items.length;
       return database.batch(...preparedUpdates);
     }, [table, name].join("."));
     return created;
@@ -245,8 +258,8 @@ export const useWatermelonLocal = <
           ),
         ),
       );
-      wmdbMetrics.write.ops++;
-      wmdbMetrics.write.rows += items.length;
+      metrics.write.ops++;
+      metrics.write.rows += items.length;
       return database.batch(...preparedCreates);
     }, [table, name].join("."));
     return created;
@@ -270,8 +283,8 @@ export const useWatermelonLocal = <
                 .then((r) =>
                   r.update(
                     (v) => (
-                      (wmdbMetrics.write.ops += 1),
-                      (wmdbMetrics.write.rows += 1),
+                      (metrics.write.ops += 1),
+                      (metrics.write.rows += 1),
                       mergeObject(v, {
                         updatedAt2: getUnixTimestamp(),
                         ...item,
@@ -325,8 +338,8 @@ export const useWatermelonLocal = <
       const preparedDeletes = records.map((record) =>
         record.prepareMarkAsDeleted(),
       );
-      wmdbMetrics.write.ops++;
-      wmdbMetrics.write.rows += items.length;
+      metrics.write.ops++;
+      metrics.write.rows += items.length;
       return database.batch(...preparedDeletes);
     }, [table, name].join("."));
   };
@@ -376,6 +389,7 @@ export const useWatermelonLocal = <
       table,
       useCache ? undefined : wmdbQuery,
       wmdbOptions,
+      metrics,
     );
 
     const fromCache = useMemo(() => {
@@ -524,7 +538,12 @@ export const useWatermelonLocal = <
       }
     }, [filterMemo]);
 
-    const fromWmdb = useWmdbCount<W>(table, useCache ? undefined : wmdbQuery);
+    const fromWmdb = useWmdbCount<W>(
+      table,
+      useCache ? undefined : wmdbQuery,
+      {},
+      metrics,
+    );
 
     const fromCache = useMemo(() => {
       if (!useCache || cache === undefined) return undefined;
@@ -558,8 +577,8 @@ export const useWatermelonLocal = <
     if (!enhancedQuery) return undefined;
 
     const rawItems = await enhancedQuery.fetch();
-    wmdbMetrics.read.ops++;
-    wmdbMetrics.read.rows += rawItems.length;
+    metrics.read.ops++;
+    metrics.read.rows += rawItems.length;
     return rawItems.map((v) => parse(v._raw));
   };
 
@@ -576,7 +595,7 @@ export const useWatermelonLocal = <
       wmdbQueryConditions,
     );
     if (!enhancedQuery) return undefined;
-    wmdbMetrics.read.ops++;
+    metrics.read.ops++;
     return await enhancedQuery.fetchCount();
   };
 
@@ -623,5 +642,6 @@ export const useWatermelonLocal = <
     get,
     count,
     CacheProvider,
+    metrics,
   } as any;
 };

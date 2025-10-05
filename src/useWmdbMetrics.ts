@@ -1,14 +1,17 @@
+import { ApiMetrics } from "@dwidge/crud-api-react";
 import { useCallback, useRef } from "react";
-import { wmdbMetrics, WmdbMetrics } from "./metrics.js";
 import { useDebouncedPoll } from "./useDebouncedPoll.js";
 
+export const createWmdbMetricsLogger = (name: string) => (v: ApiMetrics) =>
+  console.log(
+    `WatermelonDB[${name}]: Read ${v.read.ops} ${v.read.rows} - Write ${v.write.ops} ${v.write.rows}`,
+  );
+
 export const useWmdbMetrics = (
-  log = (v: WmdbMetrics) =>
-    console.log(
-      `WatermelonDB: Read ${v.read.ops} ${v.read.rows} - Write ${v.write.ops} ${v.write.rows}`,
-    ),
+  metrics?: ApiMetrics,
+  log = createWmdbMetricsLogger(metrics?.name ?? "*"),
 ) => {
-  const lastLoggedMetricsRef = useRef<WmdbMetrics>({
+  const lastLoggedMetricsRef = useRef<ApiMetrics>({
     read: {
       ops: 0,
       rows: 0,
@@ -20,25 +23,32 @@ export const useWmdbMetrics = (
   });
 
   const getter = useCallback(
-    (): WmdbMetrics => ({
-      read: { ...wmdbMetrics.read },
-      write: { ...wmdbMetrics.write },
-    }),
-    [],
+    (): ApiMetrics | undefined =>
+      metrics
+        ? {
+            read: { ...metrics.read },
+            write: { ...metrics.write },
+          }
+        : undefined,
+    [metrics],
   );
 
   const isChanged = useCallback(
-    (prev: WmdbMetrics, curr: WmdbMetrics): boolean =>
-      prev.read.ops !== curr.read.ops ||
-      prev.read.rows !== curr.read.rows ||
-      prev.write.ops !== curr.write.ops ||
-      prev.write.rows !== curr.write.rows,
+    (prev?: ApiMetrics, curr?: ApiMetrics): boolean =>
+      prev && curr
+        ? prev.read.ops !== curr.read.ops ||
+          prev.read.rows !== curr.read.rows ||
+          prev.write.ops !== curr.write.ops ||
+          prev.write.rows !== curr.write.rows
+        : false,
     [],
   );
 
   const onStable = useCallback(() => {
     const currentMetrics = getter();
-    const delta: WmdbMetrics = {
+    if (!metrics || !currentMetrics) return;
+
+    const delta: ApiMetrics = {
       read: {
         ops: currentMetrics.read.ops - lastLoggedMetricsRef.current.read.ops,
         rows: currentMetrics.read.rows - lastLoggedMetricsRef.current.read.rows,
@@ -62,5 +72,11 @@ export const useWmdbMetrics = (
     }
   }, [log, getter]);
 
-  useDebouncedPoll(getter, isChanged, onStable, 250, 1000);
+  useDebouncedPoll<ApiMetrics | undefined>(
+    getter,
+    isChanged,
+    onStable,
+    250,
+    1000,
+  );
 };
