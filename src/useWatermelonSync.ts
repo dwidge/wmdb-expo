@@ -5,10 +5,10 @@
 import { ApiWmdbItem1, ExtendedApi, Fetch } from "@dwidge/crud-api-react";
 import { groupBy, unixSeconds } from "@dwidge/utils-js";
 import { SyncPullArgs, SyncPushArgs } from "@nozbe/watermelondb/sync";
+import assert from "assert";
+import { ParseItem } from "./BaseType.js";
 import { OnSyncEvent } from "./Sync.js";
 import { fetchItemsInChunks, pushItemsInChunks } from "./fetchItemsInChunks.js";
-import { ParseItem } from "./useWatermelonLocal.js";
-import assert from "assert";
 
 export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
   pullChanges: (

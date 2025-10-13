@@ -23,99 +23,10 @@ import type { Database } from "@nozbe/watermelondb";
 import { Model, Q, TableName } from "@nozbe/watermelondb";
 import React, { createContext, useContext, useMemo, useRef } from "react";
 
+import { applyApiFilter } from "./applyApiFilter.js";
+import { applyQueryOptions } from "./applyQueryOptions.js";
+import { BaseType, ParseItem } from "./BaseType.js";
 import { buildWmdbQuery, useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
-
-export type ConvertItem<A, D> = (v: A) => D;
-export type AssertItem<T> = ConvertItem<T, T>;
-export type ParseItem<T> = ConvertItem<any, T>;
-
-const applyApiFilter = <T extends BaseType>(
-  items: T[],
-  filter?: ApiFilterObject<T>,
-): T[] => {
-  if (!filter || Object.keys(filter).length === 0) return items;
-  return items.filter((item) => {
-    for (const [k, rawValue] of Object.entries(dropUndefined(filter))) {
-      const key = k as StringKey<T>;
-      const itemValue = item[key];
-      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-
-      if (values.length === 0) {
-        return false;
-      }
-
-      let orMatch = false;
-      for (const v of values) {
-        if (typeof v === "object" && v !== null && "$range" in v) {
-          const [lower, upper] = v.$range;
-          let rangeMatch = true;
-          if (lower != undefined && (itemValue == null || itemValue < lower)) {
-            rangeMatch = false;
-          }
-          if (upper != undefined && (itemValue == null || itemValue >= upper)) {
-            rangeMatch = false;
-          }
-          if (rangeMatch) {
-            orMatch = true;
-            break;
-          }
-        } else if (typeof v === "object" && v !== null && "$not" in v) {
-          const notValue = v.$not;
-          if (notValue !== undefined && itemValue !== notValue) {
-            orMatch = true;
-            break;
-          }
-        } else if (v !== undefined) {
-          if (itemValue === v) {
-            orMatch = true;
-            break;
-          }
-        }
-      }
-      if (!orMatch) {
-        return false;
-      }
-    }
-    return true;
-  });
-};
-
-const applyQueryOptions = <T extends BaseType>(
-  items: T[],
-  options: QueryOptions<StringKey<T>>,
-): T[] => {
-  let result = items;
-  const { order, offset, limit } = options;
-
-  if (order && order.length > 0) {
-    result = [...result].sort((a, b) => {
-      for (const [key, dir] of order) {
-        const aVal = a[key as keyof T];
-        const bVal = b[key as keyof T];
-        if (aVal < bVal) return dir === "ASC" ? -1 : 1;
-        if (aVal > bVal) return dir === "ASC" ? 1 : -1;
-      }
-      return 0;
-    });
-  }
-
-  if (offset) {
-    result = result.slice(offset);
-  }
-
-  if (limit) {
-    result = result.slice(0, limit);
-  }
-
-  return result;
-};
-
-type BaseType = {
-  id: string;
-  updatedAt: number;
-  createdAt: number;
-  deletedAt: number | null;
-};
 
 export const useWatermelonLocal = <
   W extends Model,
