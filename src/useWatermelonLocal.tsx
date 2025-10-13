@@ -28,6 +28,245 @@ import { BaseType, ParseItem } from "./BaseType.js";
 import { buildQueryConditions } from "./buildQueryConditions.js";
 import { buildWmdbQuery, useWmdbCount, useWmdbQuery } from "./useWmdbQuery.js";
 
+const _warnTooManyItems = <W extends Model>(
+  table: TableName<W>,
+  v: any[] | undefined,
+  filter: any,
+  columns: string[],
+  wmdbQuery?: Q.Where[],
+) => {
+  if (v && v.length > 500)
+    console.warn(
+      "warnTooManyItemsE1: More than 500 items returned by query. Fix the query or add offset and limit to improve performance.",
+      { table, filter, columns, wmdbQuery },
+      v.slice(0, 3),
+    );
+};
+
+const _updateItemsWmdb = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  parse: ParseItem<Partial<T>>,
+  metrics: ApiMetrics,
+  items: Partial<T>[],
+  name = "updateItemsWmdb",
+) => {
+  let created: Partial<T>[] = [];
+  await database.write(async () => {
+    const records = await database
+      .get<W>(table)
+      .query(
+        Q.where(
+          "id",
+          Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
+        ),
+      )
+      .fetch();
+
+    const preparedUpdates = records.map((record) => {
+      const matchingItem = items.find((item) => item.id === record.id);
+      return record.prepareUpdate(
+        (v) => (
+          created.push(parse({ id: v.id })),
+          mergeObject(v, {
+            updatedAt2: getUnixTimestamp(),
+            ...parse(matchingItem),
+          })
+        ),
+      );
+    });
+    metrics.write.ops++;
+    metrics.write.rows += items.length;
+    return database.batch(...preparedUpdates);
+  }, [table, name].join("."));
+  return created;
+};
+
+const _createItems = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  parse: ParseItem<Partial<T>>,
+  metrics: ApiMetrics,
+  items: Partial<T>[],
+  name = "createItems",
+): Promise<Partial<T>[]> => {
+  let created: Partial<T>[] = [];
+  await database.write(() => {
+    const collection = database.get<W>(table);
+    const preparedCreates = items.map(parse).map(({ id, ...item }) =>
+      collection.prepareCreate(
+        (v) => (
+          created.push(parse({ id: v.id })),
+          mergeObject(v, {
+            createdAt2: getUnixTimestamp(),
+            updatedAt2: getUnixTimestamp(),
+            ...parse(item),
+          })
+        ),
+      ),
+    );
+    metrics.write.ops++;
+    metrics.write.rows += items.length;
+    return database.batch(...preparedCreates);
+  }, [table, name].join("."));
+  return created;
+};
+
+const _createItem = async <T extends BaseType>(
+  createItems: (items: Partial<T>[]) => Promise<Partial<T>[]>,
+  item: Partial<T>,
+): Promise<Partial<T>> => (await createItems([item]))[0]!;
+
+const _updateItem = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  parse: ParseItem<Partial<T>>,
+  metrics: ApiMetrics,
+  createItem: (item: Partial<T>) => Promise<Partial<T>>,
+  { id, ...item }: Partial<T>,
+  name = "updateItem",
+): Promise<Partial<T>> =>
+  id == null
+    ? createItem(item as Partial<T>)
+    : parse(
+        await database.write(
+          () =>
+            database
+              .get<W>(table)
+              .find(BigIntBase32.parse(id))
+              .then((r) =>
+                r.update(
+                  (v) => (
+                    (metrics.write.ops += 1),
+                    (metrics.write.rows += 1),
+                    mergeObject(v, {
+                      updatedAt2: getUnixTimestamp(),
+                      ...item,
+                    }),
+                    v
+                  ),
+                ),
+              ),
+          [table, name].join("."),
+        ),
+      );
+
+const _updateItems = async <T extends BaseType>(
+  updateItem: (item: Partial<T>) => Promise<Partial<T>>,
+  items: Partial<T>[],
+) => {
+  const updated: Partial<T>[] = [];
+  for (const item of items) {
+    updated.push(await updateItem(item));
+  }
+  return updated;
+};
+
+const _deleteItems = async <T extends BaseType>(
+  updateItems: (items: Partial<T>[]) => Promise<Partial<T>[]>,
+  items: Partial<T>[],
+) =>
+  updateItems(
+    items.map((v) => ({
+      ...v,
+      deletedAt2: getUnixTimestamp(),
+    })),
+  );
+
+const _restoreItems = async <T extends BaseType>(
+  updateItems: (items: Partial<T>[]) => Promise<Partial<T>[]>,
+  items: Partial<T>[],
+) =>
+  updateItems(
+    items.map((v) => ({
+      ...v,
+      deletedAt2: null,
+    })),
+  );
+
+const _deleteItemsWmdb = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  metrics: ApiMetrics,
+  items: Partial<T>[],
+  name = "deleteItemsWmdb",
+) => {
+  await database.write(async () => {
+    const collection = database.get<W>(table);
+    const records = await collection
+      .query(
+        Q.where(
+          "id",
+          Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
+        ),
+      )
+      .fetch();
+    const preparedDeletes = records.map((record) =>
+      record.prepareMarkAsDeleted(),
+    );
+    metrics.write.ops++;
+    metrics.write.rows += items.length;
+    return database.batch(...preparedDeletes);
+  }, [table, name].join("."));
+};
+
+const _deleteItem = async <T extends BaseType>(
+  deleteItems: (items: Partial<T>[]) => Promise<Partial<T>[]>,
+  item: Partial<T>,
+): Promise<Partial<T>> => (await deleteItems([item]))[0]!;
+
+const _restoreItem = async <T extends BaseType>(
+  restoreItems: (items: Partial<T>[]) => Promise<Partial<T>[]>,
+  item: Partial<T>,
+): Promise<Partial<T>> => (await restoreItems([item]))[0]!;
+
+const _get = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  parse: ParseItem<Partial<T>>,
+  metrics: ApiMetrics,
+  filter?: ApiFilterObject<T>,
+  options?: QueryOptions<StringKey<W>>,
+): Promise<Partial<T>[] | undefined> => {
+  const wmdbQueryConditions = filter
+    ? buildQueryConditions({
+        deletedAt: null,
+        ...filter,
+      } as ApiFilterObject<T>)
+    : [];
+  const enhancedQuery = buildWmdbQuery<W>(
+    database,
+    table,
+    wmdbQueryConditions,
+    options,
+  );
+
+  if (!enhancedQuery) return undefined;
+
+  const rawItems = await enhancedQuery.fetch();
+  metrics.read.ops++;
+  metrics.read.rows += rawItems.length;
+  return rawItems.map((v) => parse(v._raw));
+};
+
+const _count = async <W extends Model, T extends BaseType>(
+  database: Database,
+  table: TableName<W>,
+  metrics: ApiMetrics,
+  filter?: Partial<T>,
+): Promise<number | undefined> => {
+  const wmdbQueryConditions = filter
+    ? buildQueryConditions({
+        deletedAt: null,
+        ...filter,
+      } as ApiFilterObject<T>)
+    : [];
+  const enhancedQuery = buildWmdbQuery<W>(database, table, wmdbQueryConditions);
+  if (!enhancedQuery) return undefined;
+  metrics.read.ops++;
+  return await enhancedQuery.fetchCount();
+};
+
 export const useWatermelonLocal = <
   W extends Model,
   T extends BaseType,
@@ -64,162 +303,27 @@ export const useWatermelonLocal = <
     filter: any,
     columns: string[],
     wmdbQuery?: Q.Where[],
-  ) => {
-    if (v && v.length > 500)
-      console.warn(
-        "warnTooManyItemsE1: More than 500 items returned by query. Fix the query or add offset and limit to improve performance.",
-        { table, filter, columns, wmdbQuery },
-        v.slice(0, 3),
-      );
-  };
+  ) => _warnTooManyItems(table, v, filter, columns, wmdbQuery);
 
-  const updateItemsWmdb = async (
-    items: PT[],
-    name: string = "updateItemsWmdb",
-  ) => {
-    let created: PT[] = [];
-    await database.write(async () => {
-      const records = await database
-        .get<W>(table)
-        .query(
-          Q.where(
-            "id",
-            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
-          ),
-        )
-        .fetch();
+  const createItems = (items: PT[], name?: string) =>
+    _createItems(database, table, parse, metrics, items, name);
 
-      const preparedUpdates = records.map((record) => {
-        const matchingItem = items.find((item) => item.id === record.id);
-        return record.prepareUpdate(
-          (v) => (
-            created.push(parse({ id: v.id })),
-            mergeObject(v, {
-              updatedAt2: getUnixTimestamp(),
-              ...parse(matchingItem),
-            })
-          ),
-        );
-      });
-      metrics.write.ops++;
-      metrics.write.rows += items.length;
-      return database.batch(...preparedUpdates);
-    }, [table, name].join("."));
-    return created;
-  };
+  const createItem = (item: PT) => _createItem(createItems, item);
 
-  const createItems = async (
-    items: PT[],
-    name: string = "createItems",
-  ): Promise<PT[]> => {
-    let created: PT[] = [];
-    await database.write(() => {
-      const collection = database.get<W>(table);
-      const preparedCreates = items.map(parse).map(({ id, ...item }) =>
-        collection.prepareCreate(
-          (v) => (
-            created.push(parse({ id: v.id })),
-            mergeObject(v, {
-              createdAt2: getUnixTimestamp(),
-              updatedAt2: getUnixTimestamp(),
-              ...parse(item),
-            })
-          ),
-        ),
-      );
-      metrics.write.ops++;
-      metrics.write.rows += items.length;
-      return database.batch(...preparedCreates);
-    }, [table, name].join("."));
-    return created;
-  };
+  const updateItem = (item: PT, name?: string) =>
+    _updateItem(database, table, parse, metrics, createItem, item, name);
 
-  const createItem = async (item: PT): Promise<PT> =>
-    (await createItems([item]))[0]!;
+  const updateItems = (items: PT[]) => _updateItems(updateItem, items);
 
-  const updateItem = async (
-    { id, ...item }: PT,
-    name: string = "updateItem",
-  ): Promise<Partial<T>> =>
-    id == null
-      ? createItem(item as Partial<T>)
-      : parse(
-          await database.write(
-            () =>
-              database
-                .get<W>(table)
-                .find(BigIntBase32.parse(id))
-                .then((r) =>
-                  r.update(
-                    (v) => (
-                      (metrics.write.ops += 1),
-                      (metrics.write.rows += 1),
-                      mergeObject(v, {
-                        updatedAt2: getUnixTimestamp(),
-                        ...item,
-                      }),
-                      v
-                    ),
-                  ),
-                ),
-            [table, name].join("."),
-          ),
-        );
+  const deleteItems = (items: PT[]) => _deleteItems(updateItems, items);
 
-  const updateItems = async (items: PT[]) => {
-    const updated: PT[] = [];
-    for (const item of items) {
-      updated.push(await updateItem(item));
-    }
-    return updated;
-  };
+  const restoreItems = (items: PT[]) => _restoreItems(updateItems, items);
 
-  const deleteItems = async (items: PT[]) =>
-    updateItems(
-      items.map((v) => ({
-        ...v,
-        deletedAt2: getUnixTimestamp(),
-      })),
-    );
+  const deleteItemsWmdb = (items: PT[], name?: string) =>
+    _deleteItemsWmdb(database, table, metrics, items, name);
 
-  const restoreItems = async (items: PT[]) =>
-    updateItems(
-      items.map((v) => ({
-        ...v,
-        deletedAt2: null,
-      })),
-    );
-
-  const deleteItemsWmdb = async (
-    items: PT[],
-    name: string = "deleteItemsWmdb",
-  ) => {
-    return await database.write(async () => {
-      const collection = database.get<W>(table);
-      const records = await collection
-        .query(
-          Q.where(
-            "id",
-            Q.oneOf(items.map((item) => BigIntBase32.parse(item.id as string))),
-          ),
-        )
-        .fetch();
-      const preparedDeletes = records.map((record) =>
-        record.prepareMarkAsDeleted(),
-      );
-      metrics.write.ops++;
-      metrics.write.rows += items.length;
-      return database.batch(...preparedDeletes);
-    }, [table, name].join("."));
-  };
-
-  const deleteItem = async (item: PT): Promise<PT> =>
-    (await deleteItems([item]))[0]!;
-  const restoreItem = async (item: PT): Promise<PT> =>
-    (await restoreItems([item]))[0]!;
-
-  const deleteItemWmdbSingle = async (item: PT) =>
-    (await deleteItemsWmdb([item]))[0];
+  const deleteItem = (item: PT) => _deleteItem(deleteItems, item);
+  const restoreItem = (item: PT) => _restoreItem(restoreItems, item);
 
   const useGetList = (
     filter?: ApiFilterObject<T>,
@@ -426,47 +530,13 @@ export const useWatermelonLocal = <
     return useCache ? fromCache : fromWmdb;
   };
 
-  const get = async (
+  const get = (
     filter?: ApiFilterObject<T>,
     options?: QueryOptions<StringKey<W>>,
-  ): Promise<PT[] | undefined> => {
-    const wmdbQueryConditions = filter
-      ? buildQueryConditions({
-          deletedAt: null,
-          ...filter,
-        } as ApiFilterObject<T>)
-      : [];
-    const enhancedQuery = buildWmdbQuery<W>(
-      database,
-      table,
-      wmdbQueryConditions,
-      options,
-    );
+  ) => _get(database, table, parse, metrics, filter, options);
 
-    if (!enhancedQuery) return undefined;
-
-    const rawItems = await enhancedQuery.fetch();
-    metrics.read.ops++;
-    metrics.read.rows += rawItems.length;
-    return rawItems.map((v) => parse(v._raw));
-  };
-
-  const count = async (filter?: Partial<T>): Promise<number | undefined> => {
-    const wmdbQueryConditions = filter
-      ? buildQueryConditions({
-          deletedAt: null,
-          ...filter,
-        } as ApiFilterObject<T>)
-      : [];
-    const enhancedQuery = buildWmdbQuery<W>(
-      database,
-      table,
-      wmdbQueryConditions,
-    );
-    if (!enhancedQuery) return undefined;
-    metrics.read.ops++;
-    return await enhancedQuery.fetchCount();
-  };
+  const count = (filter?: Partial<T>) =>
+    _count(database, table, metrics, filter);
 
   const useList = (
     filter?: T,
