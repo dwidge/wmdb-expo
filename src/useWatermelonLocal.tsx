@@ -297,6 +297,19 @@ export const useWatermelonLocal = <
   const defaultGetColumns = allColumns.filter((v) => v !== "deletedAt") as K[];
 
   const CacheContext = createContext<T[] | undefined>(undefined);
+  const FilterContext = createContext<ApiFilterObject<T> | undefined>(
+    undefined,
+  );
+
+  const useFilterContext = (
+    filter?: ApiFilterObject<T> | PT,
+  ): ApiFilterObject<T> | undefined => {
+    const filterContext = useContext(FilterContext);
+    return useMemo(
+      () => (filter ? { ...filterContext, ...filter } : undefined),
+      [filterContext, filter],
+    );
+  };
 
   const warnTooManyItems = (
     v: any[] | undefined,
@@ -331,10 +344,11 @@ export const useWatermelonLocal = <
       columns = defaultGetColumns,
       ...options
     }: QueryOptions<K> & { columns?: StringKey<T>[] } = {},
-    filterMemo = useDeepMemo(filter),
-    columnsMemo = useDeepMemo(columns),
-    optionsMemo = useDeepMemo(options),
-    wmdbQuery = useMemo(() => {
+  ): PT[] | undefined => {
+    const filterMemo = useDeepMemo(useFilterContext(filter));
+    const columnsMemo = useDeepMemo(columns);
+    const optionsMemo = useDeepMemo(options);
+    const wmdbQuery = useMemo(() => {
       if (filterMemo) {
         const isFetchingDeletedAtColumn = columnsMemo.includes(
           "deletedAt" as StringKey<T>,
@@ -348,12 +362,11 @@ export const useWatermelonLocal = <
           ...filterMemo,
         } as ApiFilterObject<T>);
       }
-    }, [filterMemo, columnsMemo]),
-    wmdbOptions = useMemo(
+    }, [filterMemo, columnsMemo]);
+    const wmdbOptions = useMemo(
       () => ({ columns: columnsMemo, ...optionsMemo }) as any,
       [columnsMemo, optionsMemo],
-    ),
-  ): PT[] | undefined => {
+    );
     assert(Array.isArray(columnsMemo), "useGetListE1");
     const cache = useContext(CacheContext);
     const useCache = cache !== undefined;
@@ -381,22 +394,30 @@ export const useWatermelonLocal = <
     return useCache ? fromCache : fromWmdb;
   };
 
-  const useSetList = (filter?: PT, preUpdate = usePreUpdate()) =>
-    useMemo(
+  const useSetList = (filter?: PT, preUpdate = usePreUpdate()) => {
+    const mergedFilter = useFilterContext(filter);
+    return useMemo(
       () => (items: PT[]) =>
         updateItems(
-          items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+          items.map((v) =>
+            preUpdate({ ...v, ...dropUndefined(mergedFilter ?? {}) }),
+          ),
         ),
-      [preUpdate, filter],
+      [preUpdate, mergedFilter],
     );
-  const useCreateList = (filter?: PT, preUpdate = usePreUpdate()) =>
-    useMemo(
+  };
+  const useCreateList = (filter?: PT, preUpdate = usePreUpdate()) => {
+    const mergedFilter = useFilterContext(filter);
+    return useMemo(
       () => (items: PT[]) =>
         createItems(
-          items.map((v) => preUpdate({ ...v, ...dropUndefined(filter ?? {}) })),
+          items.map((v) =>
+            preUpdate({ ...v, ...dropUndefined(mergedFilter ?? {}) }),
+          ),
         ),
-      [preUpdate, filter],
+      [preUpdate, mergedFilter],
     );
+  };
   const useUpdateList = (preUpdate = usePreUpdate()) =>
     useMemo(
       () => (items: PT[]) => updateItems(items.map(preUpdate)),
@@ -424,35 +445,38 @@ export const useWatermelonLocal = <
   const useSetItem = (
     { id, ...filter }: PT = {} as PT,
     preUpdate = usePreUpdate(),
-  ): AsyncDispatch<PT | null> | undefined =>
-    useMemo(
+  ): AsyncDispatch<PT | null> | undefined => {
+    const mergedFilter = useFilterContext(filter as PT) as PT;
+    return useMemo(
       () => async (v) => {
         const next = await (typeof v === "function"
-          ? v({ id, ...dropUndefined(filter) } as PT)
+          ? v({ id, ...dropUndefined(mergedFilter) } as PT)
           : v);
         return next != null
           ? updateItem(
-              parse(preUpdate({ id, ...next, ...dropUndefined(filter) })),
+              parse(preUpdate({ id, ...next, ...dropUndefined(mergedFilter) })),
             )
           : id
             ? deleteItem(parse(preUpdate({ id } as PT)))
             : null;
       },
-      [id, filter, preUpdate, parse, updateItem, deleteItem],
+      [id, mergedFilter, preUpdate, parse, updateItem, deleteItem],
     );
+  };
 
   const useCreateItem = (
     filter?: PT,
     preUpdate = usePreUpdate(),
-    filterMemo = useDeepMemo(filter),
-  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
-    useMemo(
+  ): ((item: Partial<T>) => Promise<Partial<T>>) => {
+    const filterMemo = useDeepMemo(useFilterContext(filter));
+    return useMemo(
       () => (item: PT) =>
         createItem(
           parse(preUpdate({ ...item, ...dropUndefined(filterMemo ?? {}) })),
         ),
       [preUpdate, filterMemo, parse, createItem],
     );
+  };
   const useUpdateItem = (
     preUpdate = usePreUpdate(),
   ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
@@ -499,7 +523,8 @@ export const useWatermelonLocal = <
   const useCount = (filter?: Partial<T>): number | undefined => {
     const cache = useContext(CacheContext);
     const useCache = cache !== undefined;
-    const filterMemo = useDeepMemo(filter);
+    const mergedFilter = useFilterContext(filter);
+    const filterMemo = useDeepMemo(mergedFilter);
 
     const wmdbQuery = useMemo(() => {
       if (filterMemo) {
@@ -562,6 +587,21 @@ export const useWatermelonLocal = <
     children: React.ReactNode;
   }) => <CacheContext.Provider value={list}>{children}</CacheContext.Provider>;
 
+  const FilterProvider = ({
+    filter,
+    children,
+  }: {
+    filter: ApiFilterObject<T>;
+    children: React.ReactNode;
+  }) => {
+    const mergedFilter = useFilterContext(filter);
+    return (
+      <FilterContext.Provider value={mergedFilter}>
+        {children}
+      </FilterContext.Provider>
+    );
+  };
+
   return {
     useGetList,
     useSetList,
@@ -581,6 +621,7 @@ export const useWatermelonLocal = <
     get,
     count,
     CacheProvider,
+    FilterProvider,
     metrics,
   } as any;
 };
