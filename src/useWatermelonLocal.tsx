@@ -17,7 +17,7 @@ import {
   useMemoValue,
 } from "@dwidge/hooks-react";
 import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
-import { dropUndefined, mergeObject } from "@dwidge/utils-js";
+import { mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q, TableName } from "@nozbe/watermelondb";
 import React, { createContext, useContext, useMemo, useRef } from "react";
@@ -267,6 +267,23 @@ const _count = async <W extends Model, T extends BaseType>(
   return await enhancedQuery.fetchCount();
 };
 
+const filterToValues = <T,>(filter?: ApiFilterObject<T>): Partial<T> => {
+  if (!filter) {
+    return {};
+  }
+  const result: Partial<T> = {};
+  for (const key in filter) {
+    let value = filter[key as keyof T];
+    if (Array.isArray(value)) {
+      value = value[0];
+    }
+    if (value !== undefined && (typeof value !== "object" || value === null)) {
+      result[key as keyof T] = value as any;
+    }
+  }
+  return result;
+};
+
 export const useWatermelonLocal = <
   W extends Model,
   T extends BaseType,
@@ -395,24 +412,24 @@ export const useWatermelonLocal = <
   };
 
   const useSetList = (filter?: PT, preUpdate = usePreUpdate()) => {
-    const mergedFilter = useFilterContext(filter);
+    const mergedFilter = useDeepMemo(useFilterContext(filter));
     return useMemo(
       () => (items: PT[]) =>
         updateItems(
           items.map((v) =>
-            preUpdate({ ...v, ...dropUndefined(mergedFilter ?? {}) }),
+            preUpdate({ ...v, ...filterToValues(mergedFilter) }),
           ),
         ),
       [preUpdate, mergedFilter],
     );
   };
   const useCreateList = (filter?: PT, preUpdate = usePreUpdate()) => {
-    const mergedFilter = useFilterContext(filter);
+    const mergedFilter = useDeepMemo(useFilterContext(filter));
     return useMemo(
       () => (items: PT[]) =>
         createItems(
           items.map((v) =>
-            preUpdate({ ...v, ...dropUndefined(mergedFilter ?? {}) }),
+            preUpdate({ ...v, ...filterToValues(mergedFilter) }),
           ),
         ),
       [preUpdate, mergedFilter],
@@ -446,16 +463,15 @@ export const useWatermelonLocal = <
     { id, ...filter }: PT = {} as PT,
     preUpdate = usePreUpdate(),
   ): AsyncDispatch<PT | null> | undefined => {
-    const mergedFilter = useFilterContext(filter as PT) as PT;
+    const mergedFilter = useDeepMemo(useFilterContext(filter as PT));
     return useMemo(
       () => async (v) => {
+        const filterValues = filterToValues(mergedFilter);
         const next = await (typeof v === "function"
-          ? v({ id, ...dropUndefined(mergedFilter) } as PT)
+          ? v({ id, ...filterValues } as PT)
           : v);
         return next != null
-          ? updateItem(
-              parse(preUpdate({ id, ...next, ...dropUndefined(mergedFilter) })),
-            )
+          ? updateItem(parse(preUpdate({ id, ...next, ...filterValues })))
           : id
             ? deleteItem(parse(preUpdate({ id } as PT)))
             : null;
@@ -472,7 +488,7 @@ export const useWatermelonLocal = <
     return useMemo(
       () => (item: PT) =>
         createItem(
-          parse(preUpdate({ ...item, ...dropUndefined(filterMemo ?? {}) })),
+          parse(preUpdate({ ...item, ...filterToValues(filterMemo) })),
         ),
       [preUpdate, filterMemo, parse, createItem],
     );
