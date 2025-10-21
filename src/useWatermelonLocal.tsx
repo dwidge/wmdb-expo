@@ -290,7 +290,7 @@ export const useWatermelonLocal = <
   PK = Pick<T, "id">,
 >(
   parse: ParseItem<Partial<T>>,
-  usePreUpdate: () => ParseItem<Partial<T>>,
+  usePreUpdate: (item?: Partial<T>) => ParseItem<Partial<T>> | undefined,
   allColumns: string[],
   table: TableName<W>,
   database: Database,
@@ -411,43 +411,58 @@ export const useWatermelonLocal = <
     return useCache ? fromCache : fromWmdb;
   };
 
-  const useSetList = (filter?: PT, preUpdate = usePreUpdate()) => {
+  const useSetList = (filter?: PT, preUpdate = usePreUpdate(filter)) => {
     const mergedFilter = useDeepMemo(useFilterContext(filter));
     return useMemo(
-      () => (items: PT[]) =>
-        updateItems(
-          items.map((v) =>
-            preUpdate({ ...v, ...filterToValues(mergedFilter) }),
-          ),
-        ),
+      () =>
+        preUpdate
+          ? (items: PT[]) =>
+              updateItems(
+                items.map((v) =>
+                  preUpdate({ ...v, ...filterToValues(mergedFilter) }),
+                ),
+              )
+          : undefined,
       [preUpdate, mergedFilter],
     );
   };
   const useCreateList = (filter?: PT, preUpdate = usePreUpdate()) => {
     const mergedFilter = useDeepMemo(useFilterContext(filter));
     return useMemo(
-      () => (items: PT[]) =>
-        createItems(
-          items.map((v) =>
-            preUpdate({ ...v, ...filterToValues(mergedFilter) }),
-          ),
-        ),
+      () =>
+        preUpdate
+          ? (items: PT[]) =>
+              createItems(
+                items.map((v) =>
+                  preUpdate({ ...v, ...filterToValues(mergedFilter) }),
+                ),
+              )
+          : undefined,
       [preUpdate, mergedFilter],
     );
   };
   const useUpdateList = (preUpdate = usePreUpdate()) =>
     useMemo(
-      () => (items: PT[]) => updateItems(items.map(preUpdate)),
+      () =>
+        preUpdate
+          ? (items: PT[]) => updateItems(items.map(preUpdate))
+          : undefined,
       [preUpdate],
     );
   const useDeleteList = (preUpdate = usePreUpdate()) =>
     useMemo(
-      () => (items: PT[]) => deleteItems(items.map(preUpdate)),
+      () =>
+        preUpdate
+          ? (items: PT[]) => deleteItems(items.map(preUpdate))
+          : undefined,
       [preUpdate],
     );
   const useRestoreList = (preUpdate = usePreUpdate()) =>
     useMemo(
-      () => (items: PT[]) => restoreItems(items.map(preUpdate)),
+      () =>
+        preUpdate
+          ? (items: PT[]) => restoreItems(items.map(preUpdate))
+          : undefined,
       [preUpdate],
     );
 
@@ -460,22 +475,26 @@ export const useWatermelonLocal = <
     ] as const);
 
   const useSetItem = (
-    { id, ...filter }: PT = {} as PT,
-    preUpdate = usePreUpdate(),
+    item: PT = {} as PT,
+    preUpdate = usePreUpdate(item),
   ): AsyncDispatch<PT | null> | undefined => {
+    const { id, ...filter } = item;
     const mergedFilter = useDeepMemo(useFilterContext(filter as PT));
     return useMemo(
-      () => async (v) => {
-        const filterValues = filterToValues(mergedFilter);
-        const next = await (typeof v === "function"
-          ? v({ id, ...filterValues } as PT)
-          : v);
-        return next != null
-          ? updateItem(parse(preUpdate({ id, ...next, ...filterValues })))
-          : id
-            ? deleteItem(parse(preUpdate({ id } as PT)))
-            : null;
-      },
+      () =>
+        preUpdate
+          ? async (v) => {
+              const filterValues = filterToValues(mergedFilter);
+              const next = await (typeof v === "function"
+                ? v({ id, ...filterValues } as PT)
+                : v);
+              return next != null
+                ? updateItem(parse(preUpdate({ id, ...next, ...filterValues })))
+                : id
+                  ? deleteItem(parse(preUpdate({ id } as PT)))
+                  : null;
+            }
+          : undefined,
       [id, mergedFilter, preUpdate, parse, updateItem, deleteItem],
     );
   };
@@ -483,35 +502,38 @@ export const useWatermelonLocal = <
   const useCreateItem = (
     filter?: PT,
     preUpdate = usePreUpdate(),
-  ): ((item: Partial<T>) => Promise<Partial<T>>) => {
+  ): ((item: Partial<T>) => Promise<Partial<T>>) | undefined => {
     const filterMemo = useDeepMemo(useFilterContext(filter));
     return useMemo(
-      () => (item: PT) =>
-        createItem(
-          parse(preUpdate({ ...item, ...filterToValues(filterMemo) })),
-        ),
+      () =>
+        preUpdate
+          ? (item: PT) =>
+              createItem(
+                parse(preUpdate({ ...item, ...filterToValues(filterMemo) })),
+              )
+          : undefined,
       [preUpdate, filterMemo, parse, createItem],
     );
   };
   const useUpdateItem = (
     preUpdate = usePreUpdate(),
-  ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) =>
+  ): (({ id, ...item }: Partial<T>) => Promise<Partial<T>>) | undefined =>
     useMemo(
-      () => (v) => updateItem(parse(preUpdate(v))),
+      () => (preUpdate ? (v) => updateItem(parse(preUpdate(v))) : undefined),
       [preUpdate, parse, updateItem],
     );
   const useDeleteItem = (
     preUpdate = usePreUpdate(),
-  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
+  ): ((item: Partial<T>) => Promise<Partial<T>>) | undefined =>
     useMemo(
-      () => (v) => deleteItem(parse(preUpdate(v))),
+      () => (preUpdate ? (v) => deleteItem(parse(preUpdate(v))) : undefined),
       [preUpdate, parse, deleteItem],
     );
   const useRestoreItem = (
     preUpdate = usePreUpdate(),
-  ): ((item: Partial<T>) => Promise<Partial<T>>) =>
+  ): ((item: Partial<T>) => Promise<Partial<T>>) | undefined =>
     useMemo(
-      () => (v) => restoreItem(parse(preUpdate(v))),
+      () => (preUpdate ? (v) => restoreItem(parse(preUpdate(v))) : undefined),
       [preUpdate, parse, restoreItem],
     );
 
@@ -519,7 +541,7 @@ export const useWatermelonLocal = <
     filter?: T,
     { columns = defaultGetColumns } = {},
     getItem = useGetItem(filter, { columns }),
-    setItem = useSetItem(filter),
+    setItem = useSetItem(getItem ?? undefined),
   ): AsyncState<PT | null> =>
     useMemo(
       () => [
