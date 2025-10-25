@@ -20,7 +20,7 @@ import { BigIntBase32, getUnixTimestamp } from "@dwidge/randid";
 import { mergeObject } from "@dwidge/utils-js";
 import type { Database } from "@nozbe/watermelondb";
 import { Model, Q, TableName } from "@nozbe/watermelondb";
-import React, { createContext, useContext, useMemo, useRef } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 
 import { applyApiFilter } from "./applyApiFilter.js";
 import { applyQueryOptions } from "./applyQueryOptions.js";
@@ -284,7 +284,7 @@ const filterToValues = <T,>(filter?: ApiFilterObject<T>): Partial<T> => {
   return result;
 };
 
-export const useWatermelonLocal = <
+export const makeWatermelonApiHooks = <
   W extends Model,
   T extends BaseType,
   PK = Pick<T, "id">,
@@ -295,7 +295,7 @@ export const useWatermelonLocal = <
   table: TableName<W>,
   database: Database,
 ): BaseApiHooks<T, PK> => {
-  const metricsR = useRef<ApiMetrics>({
+  const metrics = {
     name: table,
     read: {
       ops: 0,
@@ -305,8 +305,7 @@ export const useWatermelonLocal = <
       ops: 0,
       rows: 0,
     },
-  });
-  const metrics = metricsR.current;
+  };
 
   type PT = Partial<T>;
   type K = StringKey<T>;
