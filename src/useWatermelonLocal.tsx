@@ -556,7 +556,7 @@ export const useWatermelonLocal = <
     { columns = defaultGetColumns } = {},
   ): AsyncState<PT | null> => {
     const getItem = useGetItem(filter, { columns });
-    const setItem = useSetItem(getItem ?? undefined);
+    const setItem = useSetItem(getItem ?? filter);
     return useMemo(
       () => [
         getItem,
