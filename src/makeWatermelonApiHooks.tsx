@@ -496,7 +496,7 @@ export const makeWatermelonApiHooks = <
                 ? v({ id, ...filterValues } as PT)
                 : v);
               return next != null
-                ? updateItem(parse(preUpdate({ id, ...next, ...filterValues })))
+                ? updateItem(parse(preUpdate({ id, ...filterValues, ...next })))
                 : id
                   ? deleteItem(parse(preUpdate({ id } as PT)))
                   : null;
@@ -516,7 +516,7 @@ export const makeWatermelonApiHooks = <
         preUpdate
           ? (item: PT) =>
               createItem(
-                parse(preUpdate({ ...item, ...filterToValues(filterMemo) })),
+                parse(preUpdate({ ...filterToValues(filterMemo), ...item })),
               )
           : undefined,
       [preUpdate, filterMemo, parse, createItem],
