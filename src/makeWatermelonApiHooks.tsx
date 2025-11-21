@@ -396,6 +396,7 @@ export const makeWatermelonApiHooks = <
 
     const fromCache = useMemo(() => {
       if (!useCache || cache === undefined) return undefined;
+      if (filterMemo === undefined) return undefined;
       const filtered = applyApiFilter(cache, filterMemo);
       return applyQueryOptions(filtered, optionsMemo);
     }, [useCache, cache, filterMemo, optionsMemo]);
