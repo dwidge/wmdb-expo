@@ -34,15 +34,17 @@ export type WatermelonSync<T extends Partial<ApiWmdbItem1>> = {
 
 export const useWatermelonSync = <T extends ApiWmdbItem1>(
   parse: ParseItem<Partial<T>>,
-  useApi: (f: Fetch) => ExtendedApi<T>,
+  useApi: () => (f: Fetch) => ExtendedApi<T>,
   table: string,
 ): WatermelonSync<T> => {
+  const getApi = useApi();
+
   const pullChanges = async (
     fetch: Fetch,
     { lastPulledAt, schemaVersion, migration }: SyncPullArgs,
     onSyncEvent?: OnSyncEvent,
   ) => {
-    const api = useApi(fetch);
+    const api = getApi(fetch);
     const limit = 1000;
     const rawItems = await fetchItemsInChunks(api, limit, lastPulledAt);
     const newItems = rawItems.map(parse);
@@ -95,7 +97,7 @@ export const useWatermelonSync = <T extends ApiWmdbItem1>(
     { changes, lastPulledAt }: SyncPushArgs,
     onSyncEvent?: OnSyncEvent,
   ) => {
-    const api = useApi(fetch);
+    const api = getApi(fetch);
     const limit = 100;
     const { created = [], updated = [], deleted = [] } = changes[table] || {};
 
